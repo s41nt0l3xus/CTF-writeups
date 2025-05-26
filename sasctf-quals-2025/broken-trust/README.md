@@ -394,7 +394,7 @@ fi
 After building, you can find the Linux client at `xploit/host/xploit`, and the signed TA (Trusted Application) ready for execution in OP-TEE at `xploit/ta/41414141-4141-4141-4141-414141414141.ta`.
 
 ### QEMU
-To launch QEMU, we'll use a slightly modified version of the script from the assignment archive ([run.sh](./solve/run.sh)):
+To launch QEMU, we'll use a slightly modified version of the script from the task archive ([run.sh](./solve/run.sh)):
 ```bash
 #!/bin/bash
 
@@ -413,7 +413,7 @@ qemu-system-aarch64 \
     -monitor null \
     -gdb tcp::31338
 ```
-Of particular interest among these launch options is `-serial tcp:127.0.0.1:31337`, which will redirect the second serial port—outputting Secure World logs—to a locally listening port 31337 ([listen.sh](./solve/listen.sh)):
+One of particular interest among these launch options is `-serial tcp:127.0.0.1:31337`, which will redirect the second serial port—outputting Secure World logs—to a locally listening port 31337 ([listen.sh](./solve/listen.sh)):
 ```bash
 #!/bin/bash
 
