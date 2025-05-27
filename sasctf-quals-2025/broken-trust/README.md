@@ -12,6 +12,16 @@ challenge for more information.
 nc broken-trust.task.sasc.tf 46464
 ```
 
+## TL;DR
+
+Actual exploit code is [here](./solve/xploit/ta/xploit_ta.c).
+
+All required files from original task archive is [here](./solve/server-user-reduced.tar.gz) (original archive itself is too big)
+
+Thanks to @wx0rx and @phoen1xxx for their help and great teamwork during this task
+
+Thanks to @m4drat and SAS CTF organizers for the great challenges and especially this one task
+
 ## Required knowledge
 ### Trusted Execution Environment (TEE)
 [TEE (Trusted Execution Environment)](https://en.wikipedia.org/wiki/Trusted_execution_environment) is an isolated environment within the processor that ensures secure code execution and data processing. In a system with TEE, alongside the main operating system (Normal World), another one runs in protected mode (Secure World). Applications in the host operating system can use trusted functionality from Secure World by accessing corresponding trusted applications - programs that operate within the Secure World operating system environment.
@@ -575,14 +585,14 @@ The kernel code contains four `crypto_hash_ops` virtual tables:
 - `shake256_ops`
 
 But all these virtual tables are read-only, so it means that we need to create our own fake virtual table. 
-Also it means that we can use any value of `hasing_algorithm` parameter (let's choose TEE_ALG_MD5 for example) cause we will use our own virtual table. 
+Also it means that we can use any value of `hasing_algorithm` parameter (let's choose `TEE_ALG_MD5` for example) cause we will use our own virtual table. 
 
 So, during exploitation we'll need to:
 
 1. Place a fake virtual table at known location in kernel memory
 2. Write a pointer to it in the target object
 
-We can achieve this by placing fake table in one of the buffers in `syscall_sas` (we now this address cause there is no ASLR) and writing it's address in the target object. 
+We can achieve this by placing fake table in one of the buffers in `syscall_sas` and writing it's address (we know it cause there is no ASLR) in the target object. 
 What function's addresses should we write in the fake table?
 
 - We must write `sas_do_smc_healthcheck` in place of the `final` method
@@ -766,9 +776,3 @@ SAS{fr0m_SEL0_t0_k3rnel_4nd_bey0nd}
 ```
 
 ![](./assets/meme4.jpg)
-
-Complete TA part of `xploit` code is [here](./solve/xploit/ta/xploit_ta.c).
-
-Reduced version of original task archive is [here](./solve/server-user-reduced.tar.gz)
-
-Thanks to @wx0rx and @phoen1xxx for their help and great teamwork during this task
