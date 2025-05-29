@@ -558,7 +558,7 @@ Read the flag:
   // Read flag from storage by object handle
   // Object handle is written in place of 0x41414141 in previous open call
   regs(0x41414141, FLAG_ADDRESS, 0x100, WRITEABLE_ADDRESS); // 38
-  call(OBJ_READ)                                            // 50
+  call(OBJ_READ);                                           // 50
 ```
 Return from TA:
 ```c
