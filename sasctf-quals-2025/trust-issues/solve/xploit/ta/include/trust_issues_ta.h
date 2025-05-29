@@ -1,0 +1,8 @@
+#ifndef TA_TRUST_ISSUES_H
+#define TA_TRUST_ISSUES_H
+
+#define TA_TRUST_ISSUES_UUID \
+	{ 0x41414141, 0x7472, 0x7573, \
+		{ 0x74, 0x5f, 0x69, 0x73, 0x73, 0x75, 0x65, 0x73} }
+
+#endif /*TA_HELLO_WORLD_H*/
