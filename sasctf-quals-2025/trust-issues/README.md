@@ -165,7 +165,7 @@ TEE_Result __cdecl run_code_cmd(uint32_t param_types, __GP11_TEE_Param *params)
   __asm { POP             {R7,PC} }
   return result;
 ```
-This command accepts from a client 2 input (`code` & `input`) and 1 output (`output`) buffers. It's initializes context of some VM (stands for Virtual Machine). We can conclude that there is virtual machine that executes `code` reading `input` and writing `output`. Let's look at what this VM does in function `run_code`:
+This command accepts from a client 2 input (`code` & `input`) and 1 output (`output`) buffers. It initializes context of some VM (stands for Virtual Machine). We can conclude that there is virtual machine that executes `code` reading `input` and writing `output`. Let's look at what this VM does in function `run_code`:
 ```c
 TEE_Result __cdecl run_code(VmContext_t *context)
 {
@@ -243,11 +243,11 @@ LABEL_17:
   return result;
 ```
 
-Wait a minute... It's a good old Brainfuck! Almost it: jump operation `[` and `]` are missing.
+Wait a minute... It's a good old Brainfuck! It's almost him: jump operation `[` and `]` are missing.
 
 ![](./assets/do_you_trust_me.png)
 
-So, the second command becomes clear: we can send reduced Brainfuck `code` that will read data from `input` buffer and write to `output` one.
+So, the second command becomes clear: we can send Brainfuck `code` that will read data from `input` buffer and write to `output` one.
 
 ### Vulnerability
 
@@ -273,7 +273,7 @@ Before we start writing actual exploit for the discovered vulnerability, we need
 1. Build a client for the Trustlet
 2. Run the Trustlet in a debugger
 
-These topics are already well-covered in the [Broken Trust writeup](../broken-trust/README.md). In this task, we'll focus only on the key differences from that setup and reuse most of its scripts.
+These topics are already well-covered in the [Broken Trust writeup](../broken-trust/README.md#environment-setup). In this task, we'll focus only on the key differences from that setup and reuse most of its scripts.
 
 Main differences:
 1. Uses 32-bit ARM (instead of 64-bit AArch64)
