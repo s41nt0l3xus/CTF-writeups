@@ -4,8 +4,6 @@
 
 I'm on the next level, yeah I'm on the next level
 
-IP: `nc 34.68.30.168 1337`
-
 Author: k0m1, tourpran, apn
 
 ## TL;DR
@@ -27,12 +25,14 @@ The leaked data contained results of a cryptographic operation, which I cracked 
 This task was my first experience working with Android, so besides explaining the solution, I want this writeup to serve as a guide for PWNers who, like me, are not yet familiar with Android and its hidden pitfalls. The writeup became quite long, so you can check the TL;DR if you want to read only specific parts.
 
 ### Background
+
 ![enter image description here](https://blog.bi0s.in/2024/02/26/Pwn/Tallocator-bi0sctf2024/rori_image_drawing.png)
+
 According to the task description, this is the next level. But the next level of what? After googling around a bit, I found the task [Tallocator](https://blog.bi0s.in/2024/02/26/Pwn/Tallocator-bi0sctf2024/) from last year’s bi0s CTF 2024. This task introduces a memory allocator with a native Android library that allows freeing arbitrary pointers. As we’ll see later, almost the same allocator is used in this task, and we will refer to its source code instead of reverse engineering the code of the current task.
 
 ### The Script Where It All Began
 
-Well, we need to PWN an Android application without any prior experience. Where should we start? Fortunately, the task authors provided everything needed to reproduce the remote environment within the [handout](./task/handount.zip). One of the files is a script called [script.py](./task/Handout/script.py). Let's take a look at some parts of it.
+Well, we need to PWN an Android application without any prior experience. Where should we start? Fortunately, the task authors provided everything needed to reproduce the remote environment within the [handout](./task/handout.zip). One of the files is a script called [script.py](./task/Handout/script.py). Let's take a look at some parts of it.
 ```python
 def set_EMULATOR():
     subprocess.call(
@@ -274,6 +274,8 @@ After opening [libsupernova.so](./task/libsupernova.so) in the decompiler, my fi
 
 So, let's look for functions implementing native Java methods. Luckily, their names were not stripped. Actually, not “their,” but “his.” His name is `Java_bi0sctf_challenge_MainActivity_whiplash`, which corresponds to the `whiplash` method of `MainActivity`. It’s the only native method in this library and, as we find out, it responsible for the application startup.
 
+![](./assets/together_with_gopatych.jpg)
+
 Honestly, the decompiled code of this function is too messy for this beautiful writeup, so I decided not to even bother looking at it. I think this is the moment when human resources are exhausted and it's time to call in the computers. Actually, I have one in mind. Let's call him Gopatych (GoPaTych). Gopatych is a clever guy, so let's just send all the decompiled code of `Java_bi0sctf_challenge_MainActivity_whiplash` to him with instructions to explain it:
 ```
 Hi, bro!
@@ -285,7 +287,6 @@ The JavaScript code itself can call Java methods marked with @JavascriptInterfac
 Here is the decompiled code:
 ...
 ```
-![](./assets/together_with_gopatych.jpg)
 
 Gopatych seems to have solved this task excellently and suggested the following normal Java pseudocode:
 ```java
@@ -316,7 +317,7 @@ Now, we'll move on to the second native library and hope the vulnerable code is 
 
 ![](./assets/notes_again.png)
 
-Let’s decompile libbob.so and look at the code of the native methods implemented there. Luckily, this library seems to be implemented in C, and its code is easy to read in the IDA Pro decompiler. So, let’s start with the code for the `addNote` method:
+Let’s decompile [libbob.so](./task/libbob.so) and look at the code of the native methods implemented there. Luckily, this library seems to be implemented in C, and its code is easy to read in the IDA Pro decompiler. So, let’s start with the code for the `addNote` method:
 ```c
 __int64 __fastcall Java_bi0sctf_challenge_MainActivity_addNote(__int64 some_java_shit, __int64 a2, __int64 note_obj)
 {
@@ -346,7 +347,7 @@ __int64 __fastcall Java_bi0sctf_challenge_MainActivity_addNote(__int64 some_java
 ```
 With all variable names modified to be more descriptive, this function looks very straightforward. Key aspects we need to notice:  
 1. The buffer for storing the note is allocated with `talloc`.  
-2. It copies input bytes up to its `strlen`, but not more than 0x1F (31) bytes.  
+2. It copies input bytes up to its `strlen`, but not more than `0x1F` bytes.  
 3. It enforces a limit of 10 available notes.
 
 Now, move to the `getContent` method:
@@ -434,7 +435,7 @@ unsigned __int64 num_to_str(__int64 a1, __int64 a2, __int64 a3, ...)
   return __readfsqword(0x28u);
 }
 ```
-This method does something really weird. Since the note size is limited to 0x1F bytes, reading a value (an 8-byte QWORD) at an offset of 0x20 bytes from the note start is an out-of-bounds read vulnerability. Interestingly, for now, it’s the only way to read something meaningful from memory back into the JavaScript code. 
+This method does something really weird. Since the note size is limited to `0x1F` bytes, reading a value (an `0x08`-byte qword) at an offset of `0x20` bytes from the note start is an out-of-bounds read vulnerability. Interestingly, for now, it’s the only way to read something meaningful from memory back into the JavaScript code. 
 
 Finally, move on to the last note-related method `deleteNote`:
 ```c
@@ -1025,7 +1026,7 @@ It writes a null byte right after the end of the note. So, we can use the follow
 3. Find the index of the last zero byte in the original note.  
 4. Write the note’s copy sliced up to this index via `edit`.  
 5. Replace the last zero byte in the original with something different from zero
-6. Go back to step 2 and repeat until the entire note is written.
+6. Go back to step 3 and repeat until the entire note is written.
 
 Here is an implementation of this algorithm:
 ```JavaScript
@@ -1151,32 +1152,34 @@ This code creates two small chunks, frees them, and reads the address of one chu
 
 ### Biba & Boba
 
-![enter image description here](./assets/simple_plan.png)
+![](./assets/biba_and_boba.jpg)
 
-Okay, now we know all heap addresses including those used to keep the results of the `trigger_encryption` function. But how can we read them? Obviously, we need to read them using notes allocated `0x20` bytes before the qwords we want to read. This means we need to force `talloc` to allocate a chunk `0x20` bytes before the address of the qword we want to leak. How do we force `talloc` to do that? We need to corrupt its linked list by putting the fake chunk withing required address there. And we can't put just any address, because there is no valid fake chunk at any address. Fake chunk need to satisfy two conditions:  
+Okay, now we know all heap addresses including those used to keep the results of the `trigger_encryption` function. But how can we read them? Obviously, we need to read them using notes allocated `0x20` bytes before the qwords we want to read. How do we force `talloc` to allocate it? We can corrupt its linked list by putting the fake chunk with the required address there. But we can't put just any address, because there is no valid fake chunk. A fake chunk needs to satisfy two conditions:  
 1. The `SIZE` (at `address-0x08`) of the fake chunk should be `0x20` or `0x30` with the in-use bit unset; otherwise, `talloc` won't allocate it as a note.  
 2. `FWD` (at `address+0x00`) and `BKD` (at `address+0x08`) should be correct to avoid a segfault during unlinking.
 
-To satisfy these conditions, we can use the Biba & Boba strategy:  
-1. Allocate two chunks, let's call them Biba & Boba.  
-2. Free Boba.  
-3. Free Biba.  
-4. Since Biba is freed after Boba, its `FWD` will point directly to Boba, and its `BKD` will point to the list head.  
-5. At the same time, Boba's `FWD` will point to zero, indicating the end of the free list, and its `BKD` will point back to Biba since the list is doubly linked.  
-6. Overwrite Biba's `FWD` with the address exactly `0x20` bytes before the qword we want to leak.  
-7. Place a fake version of Boba (its `SIZE` at `address-0x08`, `FWD` at `address+0x00`, and `BKD` at `address+0x08`) at the `address` we wrote into Biba's `FWD`. 
+So, we need to somehow write a fake chunk at the address we want to allocate from `talloc`. Specifically, we need to write it `0x20` bytes before the qword we want to read. And first, we want to read the first qword of `trigger_encryption` results. Actually, we can achieve this simply by calling `getId` with a note corresponding to the last `0x20` bytes chunk before them. Let's call this note and corresponding chunk Boba. So, we can leak the first qword from Boba. But after that, to read the second qword, we need to allocate a note with an address shifted by `0x08` bytes relative to the address of Boba. That means that we need to create a fake chunk right inside Boba's usable space - we can simply write `0x03` qwords (`SIZE` + `FWD` + `BKD`) to Boba. If allocated, this fake chunk will give us a leak of the qword right after the one we leaked with Boba. But how can we allocate it?
+
+Firstly, to allocate anything, we need to overwrite `FWD` of an already freed chunk. Let's call such a chunk Biba. When Biba is freed and the corresponding free list is empty, it will become its head with `BKD` pointing to the `HEAD` address and `FWD` equal to zero. If we write the address of the fake chunk to its `FWD`, it will be allocated right after Biba in the next call to `talloc`. It seems that we figured out how to allocate the fake chunk! But what `SIZE`, `FWD`, and `BKD` should we put there using Boba?
+
+We should use `0x20` as its `SIZE`, zero for `FWD` (the fake chunk is the last one in the list), and `BKD` pointing to Biba to make our doubly linked list valid.
+
+Okay, we leaked the first qword using Boba and the second one using the fake chunk created by Boba. What should we do next? I think Boba should transfer its role to the fake chunk! We can use the fake chunk exactly as we used the original Boba to create a new fake chunk and leak the next qword.
+
+Let's try to put it all together into an algorithm:  
+1. Allocate a chunk called Biba.  
+2. Allocate a chunk called Boba with size `0x20` bytes.  
+3. Trigger encryption to place the data we want to leak right after Boba.  
+4. Leak the qword using Boba.  
+5. Write the fake chunk to Boba's usable space (its note).  
+6. Free Biba.  
+7. Write the address of the fake chunk to Biba's `FWD`.  
 8. Allocate Biba back.  
-9. Allocate the fake Boba, forcing `talloc` to think it's the real one.  
-10. Read the qword we wanted from the fake Boba since its address is `0x20` bytes before the target one.
+9. Allocate the fake chunk.  
+10. Make the fake chunk the new Boba.  
+11. Go to step 4 until we read everything we want.
 
-But how do we place the fake Boba at the address we need to allocate from `talloc`? Well, we can use the real Boba for that. We'll write the fake Boba, starting from its `SIZE`, into the usable zone of the real one. This way, we'll create the fake Boba inside the real one with its address shifted by `0x08` bytes compared to the real one. Moreover, we can do this in a chain:  
-1. The read Boba, will create the first fake one and give us the first qword we want to leak.  
-2. The first fake Boba will create the second one and give us the second qword we want to leak.  
-3. Continue this until we have leaked everything we need.
-
-With this strategy, we can read the whole heap starting from the offset of `0x20` bytes from the real Boba. This is exactly what we need, since the results of `trigger_encryption` are stored right there - we can trigger encryption right after Biba and Boba allocation
-
-It sounds really complicated, but it's a classic situation when PWNing allocator's metadata. Let's move to the exploit code.
+Well, what? Yeah, it sounds really complicated, but it's a classic situation when PWNing allocator's metadata. Let's move on to the exploit code to make it easier.
 
 ### Exploit
 
