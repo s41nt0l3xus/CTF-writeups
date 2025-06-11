@@ -1,0 +1,117 @@
+#!/bin/bash
+
+# Environment copied for author's start script
+home="/home/user"
+adb_port=11000
+emu_port=11001
+apk_path="/chall/app.apk"
+export ANDROID_ADB_SERVER_PORT="${adb_port}"
+export ANDROID_SERIAL="emulator-${emu_port}"
+export ANDROID_SDK_ROOT="/opt/android/sdk"
+export ANDROID_SDK_HOME="${home}"
+export ANDROID_PREFS_ROOT="${home}"
+export ANDROID_EMULATOR_HOME="${home}/.android"
+export ANDROID_AVD_HOME="${home}/.android/avd"
+export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+export PATH="/opt/android/sdk/cmdline-tools/latest/bin:/opt/android/sdk/emulator:/opt/android/sdk/platform-tools:/bin:/usr/bin:${PATH}"
+
+# Convenient variable for possible script reuse
+APP="bi0sctf.challenge"
+ACTION="$1"
+
+case "$ACTION" in
+  emu)
+    # Creata AVD device 
+    avdmanager \
+      create avd \
+      --name 'Pixel_4_XL' \
+      --abi 'default/x86_64' \
+      --package 'system-images;android-30;default;x86_64' \
+      --device pixel_4_xl \
+      --force
+
+    # Run emulator
+    emulator \
+      -avd Pixel_4_XL \
+      -no-cache \
+      -no-snapstorage \
+      -no-snapshot-save \
+      -no-snapshot-load \
+      -no-audio \
+      -no-window \
+      -no-snapshot \
+      -no-boot-anim \
+      -wipe-data \
+      -accel on \
+      -netdelay none \
+      -netspeed full \
+      -delay-adb \
+      -writable-system \
+      -port ${emu_port}
+    ;;
+
+  init)
+    # Wait for emulator to wake up
+    adb wait-for-device
+    # Install APK
+    adb install -r "${apk_path}"
+
+    # Disable security feature to allow debugging
+    adb root                                  # get root adbd
+    adb remount                               # make /system writable
+    adb shell setenforce 0                    # stop SELinux from blocking
+    adb shell setprop security.perf_harden 0  # unlock perf counters
+
+    # Install gdbserver and forward port for him
+    adb push /opt/android/sdk/ndk-bundle/prebuilt/android-x86_64/gdbserver/gdbserver /data/local/tmp/
+    adb shell "chmod +x /data/local/tmp/gdbserver"
+    adb forward tcp:1338 tcp:1338
+    ;;
+
+  run)
+    # Run application with given URL
+    URL="$2"
+    if [ -z $URL ]; then
+      echo "Usage: $0 start <URL>"
+      exit 1
+    fi
+    adb shell am start -S -n "${APP}/.MainActivity" --es url "$URL"
+    ;;
+
+  dbg)
+    # Run application with given URL in debug mode to force it wait jdb connection
+    URL="$2"
+    if [ -z $URL ]; then
+      echo "Usage: $0 debug <URL>"
+      exit 1
+    fi
+    adb shell am set-debug-app -w bi0sctf.challenge
+    adb shell am start -S -n "${APP}/.MainActivity" --es url "$URL"
+    ;;
+
+  cont)
+    # Continue execution of application that wait's for jdb connection
+    adb forward --remove tcp:8100
+    adb forward tcp:8100 jdwp:$(adb shell pidof -s "${APP}")
+    jdb -attach localhost:8100
+    ;;
+
+  logs) 
+    # Output application logs
+    adb logcat --pid $(adb shell pidof -s "${APP}")
+    ;;
+
+  gdbsrv)
+    # Attach gdbserver
+    adb shell "/data/local/tmp/gdbserver :1338 --attach $(adb shell pidof -s \"${APP}\")"
+    ;;
+
+  findbob)
+    # Magiya Drevnih Rusov
+    adb shell 'grep -E "00880000.*base.apk" /proc/$(pidof -s bi0sctf.challenge)/maps | grep -oE "^[^-]*"'
+    ;;
+
+  *)
+    adb $@
+    ;;
+esac
