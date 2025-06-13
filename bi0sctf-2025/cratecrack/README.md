@@ -12,7 +12,7 @@ In this task, I encountered an Android application with a vulnerable native libr
 
 First, I reverse engineered the [APK file](./task/Handout/app.apk) and its native libraries to understand the functionality, identify the vulnerability, and find a way to retrieve the flag.
 
-After that, I prepared an environment for working with the application inside a Docker container, including running emulator, debugging native code and interacting with it through JavaScript.
+After that, I [prepared](#Environment%20Setup) an environment for working with the application inside a Docker container, including running emulator, debugging native code and interacting with it through JavaScript.
 
 Next, I exploited a use-after-free vulnerability in the native library to leak data from the allocator's heap using an [exploit](./task/exploit.html) written in JavaScript.
 
