@@ -1,0 +1,25 @@
+From 72dedebeea38a2d056749afe9a6c6ce034ca106e Mon Sep 17 00:00:00 2001
+From: sg <sg@debian>
+Date: Sun, 30 Mar 2025 17:15:08 +0200
+Subject: [PATCH 10/11] Fix include dir
+
+---
+ Libraries/LibWeb/WebGL/OpenGLContext.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Libraries/LibWeb/WebGL/OpenGLContext.cpp b/Libraries/LibWeb/WebGL/OpenGLContext.cpp
+index faef450683..dc821ce3b0 100644
+--- a/Libraries/LibWeb/WebGL/OpenGLContext.cpp
++++ b/Libraries/LibWeb/WebGL/OpenGLContext.cpp
+@@ -20,7 +20,7 @@
+ #include <GLES2/gl2ext_angle.h>
+ 
+ #ifdef USE_VULKAN
+-#    include <drm/drm_fourcc.h>
++#    include <libdrm/drm_fourcc.h>
+ #endif
+ 
+ namespace Web::WebGL {
+-- 
+2.39.5
+

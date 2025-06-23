@@ -1,0 +1,706 @@
+From 9350c79a0e03f4554b6fd8c9304dd07eb6bf1e5f Mon Sep 17 00:00:00 2001
+From: Andrew Kaster <andrew@ladybird.org>
+Date: Mon, 13 Jan 2025 10:49:10 -0700
+Subject: [PATCH 02/11] WIP: WIP
+
+---
+ Libraries/LibGfx/PaintingSurface.cpp          |  29 ++++
+ Libraries/LibGfx/PaintingSurface.h            |   2 +
+ Libraries/LibGfx/SkiaBackendContext.cpp       |   7 +-
+ Libraries/LibGfx/SkiaBackendContext.h         |   2 +
+ Libraries/LibGfx/VulkanContext.cpp            | 131 ++++++++++++++++-
+ Libraries/LibGfx/VulkanContext.h              |  30 +++-
+ Libraries/LibWeb/CMakeLists.txt               |   4 +-
+ Libraries/LibWeb/WebGL/OpenGLContext.cpp      | 134 +++++++++++++-----
+ .../angle/cmake-buildsystem/CMakeLists.txt    |   8 --
+ vcpkg.json                                    |   2 +-
+ 10 files changed, 291 insertions(+), 58 deletions(-)
+
+diff --git a/Libraries/LibGfx/PaintingSurface.cpp b/Libraries/LibGfx/PaintingSurface.cpp
+index bfdbe57242..b8ae3e7983 100644
+--- a/Libraries/LibGfx/PaintingSurface.cpp
++++ b/Libraries/LibGfx/PaintingSurface.cpp
+@@ -16,6 +16,9 @@
+ 
+ #ifdef AK_OS_MACOS
+ #    include <gpu/ganesh/mtl/GrMtlBackendSurface.h>
++#elif USE_VULKAN
++#    include <gpu/ganesh/vk/GrVkBackendSurface.h>
++#    include <gpu/vk/GrVkTypes.h>
+ #endif
+ 
+ namespace Gfx {
+@@ -78,6 +81,32 @@ NonnullRefPtr<PaintingSurface> PaintingSurface::wrap_iosurface(Core::IOSurfaceHa
+     auto surface = SkSurfaces::WrapBackendRenderTarget(context->sk_context(), backend_render_target, sk_origin, kBGRA_8888_SkColorType, nullptr, nullptr);
+     return adopt_ref(*new PaintingSurface(make<Impl>(size, surface, nullptr, context)));
+ }
++#else
++NonnullRefPtr<PaintingSurface> PaintingSurface::wrap_vkimage(Vulkan::Image image, RefPtr<SkiaBackendContext> context, Origin origin)
++{
++    auto image_info = SkImageInfo::Make(image.create_info.extent.width, image.create_info.extent.height, kBGRA_8888_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
++    GrVkImageInfo vk_info = {};
++    vk_info.fCurrentQueueFamily = VK_QUEUE_FAMILY_IGNORED;
++    vk_info.fFormat = image.create_info.format;
++    vk_info.fImage = image.image;
++    vk_info.fImageLayout = image.create_info.initialLayout;
++    vk_info.fImageTiling = image.create_info.tiling;
++    vk_info.fImageUsageFlags = image.create_info.usage;
++    vk_info.fSharingMode = image.create_info.sharingMode;
++    vk_info.fAlloc.fMemory = image.memory;
++    vk_info.fAlloc.fOffset = 0;
++    vk_info.fAlloc.fSize = image.alloc_size;
++    vk_info.fAlloc.fFlags = 0;
++    vk_info.fAlloc.fBackendMemory = 0;
++    vk_info.fProtected = skgpu::Protected::kNo;
++    vk_info.fSampleCount = 1;
++    vk_info.fLevelCount = 0;
++
++    auto backend_render_target = GrBackendRenderTargets::MakeVk(image_info.height(), image_info.height(), vk_info);
++    GrSurfaceOrigin sk_origin = origin == Origin::TopLeft ? kTopLeft_GrSurfaceOrigin : kBottomLeft_GrSurfaceOrigin;
++    auto surface = SkSurfaces::WrapBackendRenderTarget(context->sk_context(), backend_render_target, sk_origin, kBGRA_8888_SkColorType, nullptr, nullptr);
++    return adopt_ref(*new PaintingSurface(make<Impl>(IntSize { image.create_info.extent.width, image.create_info.extent.height }, surface, nullptr, context)));
++}
+ #endif
+ 
+ PaintingSurface::PaintingSurface(NonnullOwnPtr<Impl>&& impl)
+diff --git a/Libraries/LibGfx/PaintingSurface.h b/Libraries/LibGfx/PaintingSurface.h
+index be204d8bf2..9bcc9f2049 100644
+--- a/Libraries/LibGfx/PaintingSurface.h
++++ b/Libraries/LibGfx/PaintingSurface.h
+@@ -34,6 +34,8 @@ public:
+ 
+ #ifdef AK_OS_MACOS
+     static NonnullRefPtr<PaintingSurface> wrap_iosurface(Core::IOSurfaceHandle const&, RefPtr<SkiaBackendContext>, Origin = Origin::TopLeft);
++#elif defined(USE_VULKAN)
++    static NonnullRefPtr<PaintingSurface> wrap_vkimage(Vulkan::Image, RefPtr<SkiaBackendContext>, Origin = Origin::TopLeft);
+ #endif
+ 
+     void read_into_bitmap(Bitmap&);
+diff --git a/Libraries/LibGfx/SkiaBackendContext.cpp b/Libraries/LibGfx/SkiaBackendContext.cpp
+index 776d3f3705..08d70555b3 100644
+--- a/Libraries/LibGfx/SkiaBackendContext.cpp
++++ b/Libraries/LibGfx/SkiaBackendContext.cpp
+@@ -34,9 +34,10 @@ class SkiaVulkanBackendContext final : public SkiaBackendContext {
+     AK_MAKE_NONMOVABLE(SkiaVulkanBackendContext);
+ 
+ public:
+-    SkiaVulkanBackendContext(sk_sp<GrDirectContext> context, NonnullOwnPtr<skgpu::VulkanExtensions> extensions)
++    SkiaVulkanBackendContext(sk_sp<GrDirectContext> context, NonnullOwnPtr<skgpu::VulkanExtensions> extensions, VulkanContext& vulkan_context)
+         : m_context(move(context))
+         , m_extensions(move(extensions))
++        , m_vulkan_context(vulkan_context)
+     {
+     }
+ 
+@@ -54,10 +55,12 @@ public:
+     GrDirectContext* sk_context() const override { return m_context.get(); }
+ 
+     MetalContext& metal_context() override { VERIFY_NOT_REACHED(); }
++    VulkanContext& vulkan_context() override { return m_vulkan_context; }
+ 
+ private:
+     sk_sp<GrDirectContext> m_context;
+     NonnullOwnPtr<skgpu::VulkanExtensions> m_extensions;
++    NonnullRefPtr<VulkanContext> m_vulkan_context;
+ };
+ 
+ RefPtr<SkiaBackendContext> SkiaBackendContext::create_vulkan_context(Gfx::VulkanContext& vulkan_context)
+@@ -81,7 +84,7 @@ RefPtr<SkiaBackendContext> SkiaBackendContext::create_vulkan_context(Gfx::Vulkan
+ 
+     sk_sp<GrDirectContext> ctx = GrDirectContexts::MakeVulkan(backend_context);
+     VERIFY(ctx);
+-    return adopt_ref(*new SkiaVulkanBackendContext(ctx, move(extensions)));
++    return adopt_ref(*new SkiaVulkanBackendContext(ctx, move(extensions), vulkan_context));
+ }
+ #endif
+ 
+diff --git a/Libraries/LibGfx/SkiaBackendContext.h b/Libraries/LibGfx/SkiaBackendContext.h
+index c60cd99868..7d79212fb2 100644
+--- a/Libraries/LibGfx/SkiaBackendContext.h
++++ b/Libraries/LibGfx/SkiaBackendContext.h
+@@ -23,6 +23,7 @@ class SkSurface;
+ namespace Gfx {
+ 
+ class MetalContext;
++struct VulkanContext;
+ 
+ class SkiaBackendContext : public RefCounted<SkiaBackendContext> {
+     AK_MAKE_NONCOPYABLE(SkiaBackendContext);
+@@ -44,6 +45,7 @@ public:
+     virtual GrDirectContext* sk_context() const = 0;
+ 
+     virtual MetalContext& metal_context() = 0;
++    virtual VulkanContext& vulkan_context() = 0;
+ };
+ 
+ }
+diff --git a/Libraries/LibGfx/VulkanContext.cpp b/Libraries/LibGfx/VulkanContext.cpp
+index c7f0bb0b6a..ca1ba63de6 100644
+--- a/Libraries/LibGfx/VulkanContext.cpp
++++ b/Libraries/LibGfx/VulkanContext.cpp
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include <AK/Format.h>
++#include <AK/NonnullRefPtr.h>
+ #include <AK/Vector.h>
+ #include <LibGfx/VulkanContext.h>
+ 
+@@ -22,9 +23,16 @@ static ErrorOr<VkInstance> create_instance(uint32_t api_version)
+     app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+     app_info.apiVersion = api_version;
+ 
++    Array<char const*, 2> required_extensions = {
++        VK_KHR_SURFACE_EXTENSION_NAME,
++        VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME
++    };
++
+     VkInstanceCreateInfo create_info {};
+     create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+     create_info.pApplicationInfo = &app_info;
++    create_info.enabledExtensionCount = required_extensions.size();
++    create_info.ppEnabledExtensionNames = required_extensions.data();
+ 
+     auto result = vkCreateInstance(&create_info, nullptr, &instance);
+     if (result != VK_SUCCESS) {
+@@ -93,11 +101,19 @@ static ErrorOr<VkDevice> create_logical_device(VkPhysicalDevice physical_device)
+ 
+     VkPhysicalDeviceFeatures deviceFeatures {};
+ 
++    Array<char const*, 3> device_extensions = {
++        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
++        VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
++        VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
++    };
++
+     VkDeviceCreateInfo create_device_info {};
+     create_device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+     create_device_info.pQueueCreateInfos = &queue_create_info;
+     create_device_info.queueCreateInfoCount = 1;
+     create_device_info.pEnabledFeatures = &deviceFeatures;
++    create_device_info.enabledExtensionCount = device_extensions.size();
++    create_device_info.ppEnabledExtensionNames = device_extensions.data();
+ 
+     if (vkCreateDevice(physical_device, &create_device_info, nullptr, &device) != VK_SUCCESS) {
+         return Error::from_string_literal("Logical device creation failed");
+@@ -106,7 +122,7 @@ static ErrorOr<VkDevice> create_logical_device(VkPhysicalDevice physical_device)
+     return device;
+ }
+ 
+-ErrorOr<VulkanContext> create_vulkan_context()
++ErrorOr<NonnullRefPtr<VulkanContext>> create_vulkan_context()
+ {
+     uint32_t const api_version = VK_API_VERSION_1_0;
+     auto* instance = TRY(create_instance(api_version));
+@@ -116,13 +132,114 @@ ErrorOr<VulkanContext> create_vulkan_context()
+     VkQueue graphics_queue;
+     vkGetDeviceQueue(logical_device, 0, 0, &graphics_queue);
+ 
+-    return VulkanContext {
+-        .api_version = api_version,
+-        .instance = instance,
+-        .physical_device = physical_device,
+-        .logical_device = logical_device,
+-        .graphics_queue = graphics_queue,
++    return make_ref_counted<VulkanContext>(
++        api_version,
++        instance,
++        physical_device,
++        logical_device,
++        graphics_queue);
++}
++
++namespace Vulkan {
++
++static uint32_t findMemoryType(VkPhysicalDevice physical_device, uint32_t type_filter, VkMemoryPropertyFlags properties)
++{
++    VkPhysicalDeviceMemoryProperties memory_properties = {};
++    vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
++
++    for (uint32_t i = 0; i < memory_properties.memoryTypeCount; i++) {
++        if ((type_filter & (1 << i)) && (memory_properties.memoryTypes[i].propertyFlags & properties) == properties) {
++            return i;
++        }
++    }
++
++    VERIFY_NOT_REACHED();
++}
++
++static ErrorOr<int> export_memory_to_dmabuf(VkDevice device, VkDeviceMemory memory)
++{
++    VkMemoryGetFdInfoKHR get_fd_info {};
++    get_fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
++    get_fd_info.memory = memory;
++    get_fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
++
++    int dma_buf_fd = -1;
++    PFN_vkGetMemoryFdKHR vkGetMemoryFdKHR = (PFN_vkGetMemoryFdKHR)vkGetDeviceProcAddr(device, "vkGetMemoryFdKHR");
++    VERIFY(vkGetMemoryFdKHR);
++
++    if (vkGetMemoryFdKHR(device, &get_fd_info, &dma_buf_fd) != VK_SUCCESS) {
++        return Error::from_string_literal("Failed to export memory to dma_buf");
++    }
++
++    return dma_buf_fd;
++}
++
++ErrorOr<Image> create_image(VulkanContext& context, VkExtent2D extent, VkFormat format)
++{
++    VkImageCreateInfo image_create_info {};
++    image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
++    image_create_info.imageType = VK_IMAGE_TYPE_2D;
++    image_create_info.format = format;
++    image_create_info.extent = { extent.width, extent.height, 1 };
++    image_create_info.mipLevels = 1;
++    image_create_info.arrayLayers = 1;
++    image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
++    image_create_info.tiling = VK_IMAGE_TILING_LINEAR;
++    image_create_info.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
++    ;
++    image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
++    image_create_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
++
++    VkExternalMemoryImageCreateInfo external_memory_image_create_info {};
++    external_memory_image_create_info.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
++    external_memory_image_create_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
++    image_create_info.pNext = &external_memory_image_create_info;
++
++    VkImage image = VK_NULL_HANDLE;
++    if (vkCreateImage(context.logical_device, &image_create_info, nullptr, &image) != VK_SUCCESS) {
++        return Error::from_string_literal("Image creation failed");
++    }
++
++    VkMemoryRequirements memory_requirements = {};
++    vkGetImageMemoryRequirements(context.logical_device, image, &memory_requirements);
++
++    VkMemoryAllocateInfo alloc_info {};
++    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
++    alloc_info.allocationSize = memory_requirements.size;
++    alloc_info.memoryTypeIndex = findMemoryType(context.physical_device, memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
++
++    VkExportMemoryAllocateInfo export_memory_allocate_info {};
++    export_memory_allocate_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
++    export_memory_allocate_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
++    alloc_info.pNext = &export_memory_allocate_info;
++
++    VkDeviceMemory image_memory = {};
++    if (vkAllocateMemory(context.logical_device, &alloc_info, nullptr, &image_memory) != VK_SUCCESS) {
++        vkDestroyImage(context.logical_device, image, nullptr);
++        return Error::from_string_literal("Image memory allocation failed");
++    }
++
++    if (vkBindImageMemory(context.logical_device, image, image_memory, 0) != VK_SUCCESS) {
++        vkFreeMemory(context.logical_device, image_memory, nullptr);
++        vkDestroyImage(context.logical_device, image, nullptr);
++        return Error::from_string_literal("Image memory binding failed");
++    }
++
++    auto exported_fd = TRY(export_memory_to_dmabuf(context.logical_device, image_memory));
++
++    auto image_create_info_copy = image_create_info;
++    image_create_info_copy.pNext = nullptr;
++
++    return Image {
++        .device = context.logical_device,
++        .image = image,
++        .memory = image_memory,
++        .alloc_size = memory_requirements.size,
++        .create_info = image_create_info_copy,
++        .exported_fd = exported_fd
+     };
+ }
+ 
+ }
++
++}
+diff --git a/Libraries/LibGfx/VulkanContext.h b/Libraries/LibGfx/VulkanContext.h
+index 7972f1779a..21c9d2caf5 100644
+--- a/Libraries/LibGfx/VulkanContext.h
++++ b/Libraries/LibGfx/VulkanContext.h
+@@ -10,19 +10,45 @@
+ 
+ #    include <AK/Forward.h>
+ #    include <AK/Function.h>
++#    include <AK/RefCounted.h>
+ #    include <vulkan/vulkan.h>
+ 
+ namespace Gfx {
+ 
+-struct VulkanContext {
++struct VulkanContext : public RefCounted<VulkanContext> {
+     uint32_t api_version { VK_API_VERSION_1_0 };
+     VkInstance instance { VK_NULL_HANDLE };
+     VkPhysicalDevice physical_device { VK_NULL_HANDLE };
+     VkDevice logical_device { VK_NULL_HANDLE };
+     VkQueue graphics_queue { VK_NULL_HANDLE };
++
++    VulkanContext(uint32_t api_version, VkInstance instance, VkPhysicalDevice physical_device, VkDevice logical_device, VkQueue graphics_queue)
++        : api_version(api_version)
++        , instance(instance)
++        , physical_device(physical_device)
++        , logical_device(logical_device)
++        , graphics_queue(graphics_queue)
++    {
++    }
+ };
+ 
+-ErrorOr<VulkanContext> create_vulkan_context();
++ErrorOr<NonnullRefPtr<VulkanContext>> create_vulkan_context();
++
++namespace Vulkan {
++
++// TODO: Make this more RAII and less C
++struct Image {
++    VkDevice device { VK_NULL_HANDLE };
++    VkImage image { VK_NULL_HANDLE };
++    VkDeviceMemory memory { VK_NULL_HANDLE };
++    VkDeviceSize alloc_size { 0 };
++    VkImageCreateInfo create_info {};
++    int exported_fd = { -1 };
++};
++
++ErrorOr<Image> create_image(VulkanContext&, VkExtent2D, VkFormat);
++
++}
+ 
+ }
+ 
+diff --git a/Libraries/LibWeb/CMakeLists.txt b/Libraries/LibWeb/CMakeLists.txt
+index 04fbefa92a..ef61364117 100644
+--- a/Libraries/LibWeb/CMakeLists.txt
++++ b/Libraries/LibWeb/CMakeLists.txt
+@@ -2,7 +2,7 @@ include(libweb_generators)
+ include(vulkan)
+ include(skia)
+ 
+-if (APPLE)
++if (APPLE OR LINUX)
+     find_package(unofficial-angle REQUIRED CONFIG)
+ endif()
+ 
+@@ -924,7 +924,7 @@ serenity_lib(LibWeb web)
+ 
+ target_link_libraries(LibWeb PRIVATE LibCore LibCompress LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibMedia LibWasm LibXML LibIDL LibURL LibTLS LibRequests LibGC skia)
+ 
+-if (APPLE)
++if (APPLE OR LINUX)
+     target_link_libraries(LibWeb PRIVATE unofficial::angle::libEGL unofficial::angle::libGLESv2)
+ endif()
+ 
+diff --git a/Libraries/LibWeb/WebGL/OpenGLContext.cpp b/Libraries/LibWeb/WebGL/OpenGLContext.cpp
+index db3b954442..faef450683 100644
+--- a/Libraries/LibWeb/WebGL/OpenGLContext.cpp
++++ b/Libraries/LibWeb/WebGL/OpenGLContext.cpp
+@@ -4,24 +4,28 @@
+  * SPDX-License-Identifier: BSD-2-Clause
+  */
+ 
++#define EGL_EGLEXT_PROTOTYPES
++
+ #include <AK/OwnPtr.h>
+ #include <AK/String.h>
++#include <LibGfx/Bitmap.h>
+ #include <LibGfx/PaintingSurface.h>
+ #include <LibWeb/WebGL/OpenGLContext.h>
+ 
+-#ifdef AK_OS_MACOS
+-#    include <EGL/egl.h>
+-#    include <EGL/eglext.h>
+-#    include <EGL/eglext_angle.h>
+-#    include <GLES2/gl2.h>
+-#    include <GLES2/gl2ext.h>
+-#    include <GLES2/gl2ext_angle.h>
++#include <EGL/egl.h>
++#include <EGL/eglext.h>
++#include <EGL/eglext_angle.h>
++#include <GLES2/gl2.h>
++#include <GLES2/gl2ext.h>
++#include <GLES2/gl2ext_angle.h>
++
++#ifdef USE_VULKAN
++#    include <drm/drm_fourcc.h>
+ #endif
+ 
+ namespace Web::WebGL {
+ 
+ struct OpenGLContext::Impl {
+-#ifdef AK_OS_MACOS
+     EGLDisplay display { nullptr };
+     EGLConfig config { nullptr };
+     EGLContext context { nullptr };
+@@ -29,7 +33,6 @@ struct OpenGLContext::Impl {
+ 
+     GLuint framebuffer { 0 };
+     GLuint depth_buffer { 0 };
+-#endif
+ };
+ 
+ OpenGLContext::OpenGLContext(NonnullRefPtr<Gfx::SkiaBackendContext> skia_backend_context, Impl impl)
+@@ -40,16 +43,13 @@ OpenGLContext::OpenGLContext(NonnullRefPtr<Gfx::SkiaBackendContext> skia_backend
+ 
+ OpenGLContext::~OpenGLContext()
+ {
+-#ifdef AK_OS_MACOS
+     eglMakeCurrent(m_impl->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+     glDeleteFramebuffers(1, &m_impl->framebuffer);
+     glDeleteRenderbuffers(1, &m_impl->depth_buffer);
+     eglDestroyContext(m_impl->display, m_impl->context);
+     eglDestroySurface(m_impl->display, m_impl->surface);
+-#endif
+ }
+ 
+-#ifdef AK_OS_MACOS
+ static EGLConfig get_egl_config(EGLDisplay display)
+ {
+     EGLint const config_attribs[] = {
+@@ -72,17 +72,40 @@ static EGLConfig get_egl_config(EGLDisplay display)
+     eglChooseConfig(display, config_attribs, configs.data(), number_of_configs, &number_of_configs);
+     return configs[0];
+ }
+-#endif
+ 
+ OwnPtr<OpenGLContext> OpenGLContext::create(NonnullRefPtr<Gfx::SkiaBackendContext> skia_backend_context)
+ {
+-#ifdef AK_OS_MACOS
+-    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
++    EGLDisplay display = EGL_NO_DISPLAY;
++
++    // FIXME: Use egl extension query and command line flags to get the platform type
++    EGLAttrib angle_platform_type = EGL_PLATFORM_ANGLE_TYPE_DEFAULT_ANGLE;
++#if defined(USE_VULKAN)
++    angle_platform_type = EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE;
++#elif defined(AK_OS_MACOS) || defined(AK_OS_IOS)
++    angle_platform_type = EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE;
++#endif
++
++    EGLAttrib attributes[] = {
++        EGL_PLATFORM_ANGLE_TYPE_ANGLE,
++        angle_platform_type,
++        EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE,
++        EGL_PLATFORM_ANGLE_DEVICE_TYPE_HARDWARE_ANGLE,
++        EGL_NONE,
++    };
++    display = eglGetPlatformDisplay(EGL_PLATFORM_ANGLE_ANGLE, EGL_DEFAULT_DISPLAY, attributes);
++
+     if (display == EGL_NO_DISPLAY) {
+-        dbgln("Failed to get EGL display");
+-        return {};
++        dbgln("Unable to get display for preferred angle platform type {:x}, falling back to default display: {:x}", angle_platform_type, eglGetError());
++        display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
++        if (display == EGL_NO_DISPLAY) {
++            dbgln("Failed to get EGL display: {:x}", eglGetError());
++            return {};
++        }
+     }
+ 
++    char const* extensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
++    dbgln("EGL extensions: {}", extensions);
++
+     EGLint major, minor;
+     if (!eglInitialize(display, &major, &minor)) {
+         dbgln("Failed to initialize EGL");
+@@ -101,11 +124,7 @@ OwnPtr<OpenGLContext> OpenGLContext::create(NonnullRefPtr<Gfx::SkiaBackendContex
+         return {};
+     }
+ 
+-    return make<OpenGLContext>(skia_backend_context, Impl { .display = display, .config = config, .context = context });
+-#else
+-    (void)skia_backend_context;
+-    return nullptr;
+-#endif
++    return make<OpenGLContext>(move(skia_backend_context), Impl { .display = display, .config = config, .context = context });
+ }
+ 
+ void OpenGLContext::notify_content_will_change()
+@@ -119,14 +138,23 @@ void OpenGLContext::clear_buffer_to_default_values()
+ 
+ void OpenGLContext::allocate_painting_surface_if_needed()
+ {
+-#ifdef AK_OS_MACOS
+     if (m_painting_surface)
+         return;
+ 
+     VERIFY(!m_size.is_empty());
+ 
++#ifdef AK_OS_MACOS
+     auto iosurface = Core::IOSurfaceHandle::create(m_size.width(), m_size.height());
+     m_painting_surface = Gfx::PaintingSurface::wrap_iosurface(iosurface, m_skia_backend_context, Gfx::PaintingSurface::Origin::BottomLeft);
++#else
++    VkExtent2D const extent { static_cast<uint32_t>(m_size.width()), static_cast<uint32_t>(m_size.height()) };
++    auto vulkan_image_or_error = Gfx::Vulkan::create_image(m_skia_backend_context->vulkan_context(), extent, VK_FORMAT_B8G8R8A8_UNORM);
++    if (vulkan_image_or_error.is_error()) {
++        dbgln("Failed to create Vulkan image: {}", vulkan_image_or_error.error());
++        VERIFY_NOT_REACHED();
++    }
++    auto vulkan_image = vulkan_image_or_error.release_value();
++#endif
+ 
+     auto width = m_size.width();
+     auto height = m_size.height();
+@@ -134,14 +162,17 @@ void OpenGLContext::allocate_painting_surface_if_needed()
+     auto* display = m_impl->display;
+     auto* config = m_impl->config;
+ 
++#ifdef AK_OS_MACOS
+     EGLint target = 0;
+     eglGetConfigAttrib(display, config, EGL_BIND_TO_TEXTURE_TARGET_ANGLE, &target);
++#endif
+ 
+     EGLint const surface_attributes[] = {
+         EGL_WIDTH,
+         width,
+         EGL_HEIGHT,
+         height,
++#ifdef AK_OS_MACOS
+         EGL_IOSURFACE_PLANE_ANGLE,
+         0,
+         EGL_TEXTURE_TARGET,
+@@ -153,25 +184,63 @@ void OpenGLContext::allocate_painting_surface_if_needed()
+         EGL_TEXTURE_TYPE_ANGLE,
+         GL_UNSIGNED_BYTE,
+         EGL_NONE,
++#endif
+         EGL_NONE,
+     };
++
++#ifdef AK_OS_MACOS
+     m_impl->surface = eglCreatePbufferFromClientBuffer(display, EGL_IOSURFACE_ANGLE, iosurface.core_foundation_pointer(), config, surface_attributes);
++#else
++    int dma_buf_fd = vulkan_image.exported_fd;
++    dbgln("Exported dma_buf fd: {}", dma_buf_fd);
++
++    ScopeGuard close_dma_buf_fd = [&] { ::close(dma_buf_fd); };
++
++    EGLint image_attribs[] = {
++        EGL_WIDTH, width,
++        EGL_HEIGHT, height,
++        EGL_LINUX_DRM_FOURCC_EXT, DRM_FORMAT_ARGB8888,
++        EGL_DMA_BUF_PLANE0_FD_EXT, dma_buf_fd,
++        EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
++        EGL_DMA_BUF_PLANE0_PITCH_EXT, width * 4,
++        EGL_NONE
++    };
++    EGLImageKHR egl_image = eglCreateImageKHR(m_impl->display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, image_attribs);
++    VERIFY(egl_image != EGL_NO_IMAGE_KHR);
++
++    m_impl->surface = eglCreatePbufferFromClientBuffer(m_impl->display, EGL_LINUX_DMA_BUF_EXT, egl_image, config, surface_attributes);
++
++    m_painting_surface = Gfx::PaintingSurface::wrap_vkimage(vulkan_image, m_skia_backend_context, Gfx::PaintingSurface::Origin::BottomLeft);
++#endif
++
++    if (m_impl->surface == EGL_NO_SURFACE) {
++        dbgln("Failed to create EGL surface: {:x}", eglGetError());
++        VERIFY_NOT_REACHED();
++    }
+ 
+     eglMakeCurrent(m_impl->display, m_impl->surface, m_impl->surface, m_impl->context);
+ 
+-    EGLint texture_target_angle = 0;
+-    eglGetConfigAttrib(display, config, EGL_BIND_TO_TEXTURE_TARGET_ANGLE, &texture_target_angle);
+-    VERIFY(texture_target_angle == EGL_TEXTURE_RECTANGLE_ANGLE);
++    EGLint texture_target = 0;
++#ifdef AK_OS_MACOS
++    eglGetConfigAttrib(display, config, EGL_BIND_TO_TEXTURE_TARGET_ANGLE, &texture_target);
++    VERIFY(texture_target == EGL_TEXTURE_RECTANGLE_ANGLE);
++#else
++    texture_target = GL_TEXTURE_2D;
++#endif
+ 
+     GLuint texture = 0;
+     glGenTextures(1, &texture);
+-    glBindTexture(GL_TEXTURE_RECTANGLE_ANGLE, texture);
++    glBindTexture(texture_target, texture);
++
+     auto result = eglBindTexImage(display, m_impl->surface, EGL_BACK_BUFFER);
+-    VERIFY(result == EGL_TRUE);
++    if (result == EGL_FALSE) {
++        dbgln("Failed to bind texture image to EGL surface: {:x}", eglGetError());
++        VERIFY_NOT_REACHED();
++    }
+ 
+     glGenFramebuffers(1, &m_impl->framebuffer);
+     glBindFramebuffer(GL_FRAMEBUFFER, m_impl->framebuffer);
+-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_RECTANGLE_ANGLE, texture, 0);
++    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, texture_target, texture, 0);
+ 
+     // NOTE: ANGLE doesn't allocate depth buffer for us, so we need to do it manually
+     // FIXME: Depth buffer only needs to be allocated if it's configured in WebGL context attributes
+@@ -179,7 +248,6 @@ void OpenGLContext::allocate_painting_surface_if_needed()
+     glBindRenderbuffer(GL_RENDERBUFFER, m_impl->depth_buffer);
+     glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, width, height);
+     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_impl->depth_buffer);
+-#endif
+ }
+ 
+ void OpenGLContext::set_size(Gfx::IntSize const& size)
+@@ -192,10 +260,8 @@ void OpenGLContext::set_size(Gfx::IntSize const& size)
+ 
+ void OpenGLContext::make_current()
+ {
+-#ifdef AK_OS_MACOS
+     allocate_painting_surface_if_needed();
+     eglMakeCurrent(m_impl->display, m_impl->surface, m_impl->surface, m_impl->context);
+-#endif
+ }
+ 
+ RefPtr<Gfx::PaintingSurface> OpenGLContext::surface()
+@@ -264,7 +330,6 @@ Vector<StringView> s_available_webgl_extensions {
+ 
+ Vector<String> OpenGLContext::get_supported_extensions()
+ {
+-#ifdef AK_OS_MACOS
+     make_current();
+ 
+     auto const* extensions_string = reinterpret_cast<char const*>(glGetString(GL_EXTENSIONS));
+@@ -280,9 +345,6 @@ Vector<String> OpenGLContext::get_supported_extensions()
+     }
+ 
+     return extensions;
+-#else
+-    return {};
+-#endif
+ }
+ 
+ }
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/CMakeLists.txt b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/CMakeLists.txt
+index 110c5a0975..5a724a9e68 100644
+--- a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/CMakeLists.txt
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/CMakeLists.txt
+@@ -286,10 +286,6 @@ if (USE_ANGLE_EGL OR ENABLE_WEBGL)
+         target_sources(GLESv2 PRIVATE src/libGLESv2/libGLESv2_autogen.def)
+         set_target_properties(GLESv2 PROPERTIES OUTPUT_NAME libGLESv2)
+     endif ()
+-    # Rename libs to avoid conflict with system OpenGL
+-    if(NOT VCPKG_TARGET_IS_WINDOWS)
+-        set_target_properties(GLESv2 PROPERTIES OUTPUT_NAME libGLESv2_angle)
+-    endif()
+ 
+     add_library(GLESv2Framework INTERFACE)
+     target_link_libraries(GLESv2Framework INTERFACE GLESv2)
+@@ -316,10 +312,6 @@ if (USE_ANGLE_EGL OR ENABLE_WEBGL)
+             target_sources(EGL PRIVATE src/libEGL/libEGL_autogen.def)
+             set_target_properties(EGL PROPERTIES OUTPUT_NAME libEGL)
+         endif ()
+-        # Rename libs to avoid conflict with system OpenGL
+-        if(NOT VCPKG_TARGET_IS_WINDOWS)
+-            set_target_properties(EGL PROPERTIES OUTPUT_NAME libEGL_angle)
+-        endif()
+ 
+         add_library(EGLFramework INTERFACE)
+         target_include_directories(EGLFramework INTERFACE ${ANGLE_FRAMEWORK_HEADERS_DIR}/)
+diff --git a/vcpkg.json b/vcpkg.json
+index c498a765ab..006fc7ca2d 100644
+--- a/vcpkg.json
++++ b/vcpkg.json
+@@ -3,7 +3,7 @@
+   "dependencies": [
+     {
+       "name": "angle",
+-      "platform": "osx"
++      "platform": "osx | linux"
+     },
+     {
+       "name": "curl",
+-- 
+2.39.5
+

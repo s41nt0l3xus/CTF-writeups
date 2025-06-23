@@ -1,0 +1,32 @@
+From 7b25241bafa638c15fe232d7a7c88f6f5735a273 Mon Sep 17 00:00:00 2001
+From: sg <sg@debian>
+Date: Sun, 30 Mar 2025 17:12:23 +0200
+Subject: [PATCH 07/11] Ignore patches
+
+I don't care about windows
+---
+ Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake
+index ca4d17de63..020923ae83 100644
+--- a/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake
+@@ -42,10 +42,10 @@ vcpkg_from_github(
+     REF ${ANGLE_COMMIT}
+     SHA512 ${ANGLE_SHA512}
+     # On update check headers against opengl-registry
+-    PATCHES
+-        001-fix-uwp.patch
+-        002-fix-builder-error.patch
+-        003-fix-mingw.patch
++#    PATCHES
++#        001-fix-uwp.patch
++#        002-fix-builder-error.patch
++#        003-fix-mingw.patch
+ )
+ 
+ # Generate angle_commit.h
+-- 
+2.39.5
+

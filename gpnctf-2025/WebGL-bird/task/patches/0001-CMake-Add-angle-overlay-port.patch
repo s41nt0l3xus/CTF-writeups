@@ -1,0 +1,1294 @@
+From c5008caef5ee1fb8527a293f9c94e00714b9b625 Mon Sep 17 00:00:00 2001
+From: Andrew Kaster <andrew@ladybird.org>
+Date: Fri, 20 Dec 2024 10:54:49 -0700
+Subject: [PATCH 01/11] CMake: Add angle overlay port
+
+---
+ .../overlay-ports/angle/001-fix-uwp.patch     |  30 ++
+ .../angle/002-fix-builder-error.patch         |  40 ++
+ .../overlay-ports/angle/003-fix-mingw.patch   |  22 +
+ .../overlay-ports/angle/angle_commit.h.in     |   4 +
+ .../angle/cmake-buildsystem/CMakeLists.txt    | 477 ++++++++++++++++++
+ .../cmake-buildsystem/PlatformLinux.cmake     |  30 ++
+ .../angle/cmake-buildsystem/PlatformMac.cmake |  59 +++
+ .../angle/cmake-buildsystem/PlatformWin.cmake |  67 +++
+ .../cmake/WebKitCommon-minimal.cmake          | 192 +++++++
+ .../angle/cmake-buildsystem/linux.cmake       |   6 +
+ .../vcpkg/overlay-ports/angle/portfile.cmake  | 193 +++++++
+ .../angle/unofficial-angle-config.cmake       |   7 +
+ Meta/CMake/vcpkg/overlay-ports/angle/usage    |   8 +
+ .../vcpkg/overlay-ports/angle/vcpkg.json      |  36 ++
+ 14 files changed, 1171 insertions(+)
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/001-fix-uwp.patch
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/002-fix-builder-error.patch
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/003-fix-mingw.patch
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/angle_commit.h.in
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/CMakeLists.txt
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformLinux.cmake
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformMac.cmake
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformWin.cmake
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/cmake/WebKitCommon-minimal.cmake
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/linux.cmake
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/unofficial-angle-config.cmake
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/usage
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/vcpkg.json
+
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/001-fix-uwp.patch b/Meta/CMake/vcpkg/overlay-ports/angle/001-fix-uwp.patch
+new file mode 100644
+index 0000000000..cba68d69be
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/001-fix-uwp.patch
+@@ -0,0 +1,30 @@
++diff --git a/src/libANGLE/renderer/d3d/d3d11/winrt/CoreWindowNativeWindow.cpp b/src/libANGLE/renderer/d3d/d3d11/winrt/CoreWindowNativeWindow.cpp
++index 7d3f078d6..fac057dd6 100644
++--- a/src/libANGLE/renderer/d3d/d3d11/winrt/CoreWindowNativeWindow.cpp
+++++ b/src/libANGLE/renderer/d3d/d3d11/winrt/CoreWindowNativeWindow.cpp
++@@ -213,16 +213,20 @@ HRESULT GetCoreWindowSizeInPixels(const ComPtr<ABI::Windows::UI::Core::ICoreWind
++ 
++ static float GetLogicalDpi()
++ {
++-    ComPtr<ABI::Windows::Graphics::Display::IDisplayPropertiesStatics> displayProperties;
+++    ComPtr<ABI::Windows::Graphics::Display::IDisplayInformationStatics> displayInformationStatics;
+++    ComPtr<ABI::Windows::Graphics::Display::IDisplayInformation> displayInformation;
++ 
++     if (SUCCEEDED(GetActivationFactory(
++-            HStringReference(RuntimeClass_Windows_Graphics_Display_DisplayProperties).Get(),
++-            displayProperties.GetAddressOf())))
+++            HStringReference(RuntimeClass_Windows_Graphics_Display_DisplayInformation).Get(),
+++            displayInformationStatics.GetAddressOf())))
++     {
++         float dpi = 96.0f;
++-        if (SUCCEEDED(displayProperties->get_LogicalDpi(&dpi)))
+++        if (SUCCEEDED(displayInformationStatics->GetForCurrentView(&displayInformation)))
++         {
++-            return dpi;
+++            if (SUCCEEDED(displayInformation->get_LogicalDpi(&dpi)))
+++            {
+++                return dpi;
+++            }
++         }
++     }
++ 
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/002-fix-builder-error.patch b/Meta/CMake/vcpkg/overlay-ports/angle/002-fix-builder-error.patch
+new file mode 100644
+index 0000000000..a6d56ac62f
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/002-fix-builder-error.patch
+@@ -0,0 +1,40 @@
++diff --git a/src/gpu_info_util/SystemInfo_win.cpp b/src/gpu_info_util/SystemInfo_win.cpp
++index f4bb137f2..86495013b 100644
++--- a/src/gpu_info_util/SystemInfo_win.cpp
+++++ b/src/gpu_info_util/SystemInfo_win.cpp
++@@ -6,11 +6,6 @@
++ 
++ // SystemInfo_win.cpp: implementation of the Windows-specific parts of SystemInfo.h
++ 
++-#include "gpu_info_util/SystemInfo_internal.h"
++-
++-#include "common/debug.h"
++-#include "common/string_utils.h"
++-
++ // Windows.h needs to be included first
++ #include <windows.h>
++ 
++@@ -19,6 +14,11 @@
++ #include <array>
++ #include <sstream>
++ 
+++#include "gpu_info_util/SystemInfo_internal.h"
+++
+++#include "common/debug.h"
+++#include "common/string_utils.h"
+++
++ namespace angle
++ {
++ 
++diff --git a/include/GLSLANG/ShaderVars.h b/include/GLSLANG/ShaderVars.h
++index 94cb93e..5593f66 100644
++--- a/include/GLSLANG/ShaderVars.h
+++++ b/include/GLSLANG/ShaderVars.h
++@@ -14,6 +14,7 @@
++ #include <array>
++ #include <string>
++ #include <vector>
+++#include <stdint.h>
++ 
++ namespace sh
++ {
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/003-fix-mingw.patch b/Meta/CMake/vcpkg/overlay-ports/angle/003-fix-mingw.patch
+new file mode 100644
+index 0000000000..304d822ec5
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/003-fix-mingw.patch
+@@ -0,0 +1,22 @@
++diff --git a/src/common/mathutil.h b/src/common/mathutil.h
++index 1d73bbf..c5b9cc8 100644
++--- a/src/common/mathutil.h
+++++ b/src/common/mathutil.h
++@@ -1073,7 +1073,7 @@ inline int BitCount(uint64_t bits)
++ #    endif  // defined(_M_IX86) || defined(_M_X64)
++ #endif      // defined(_MSC_VER) && !defined(__clang__)
++ 
++-#if defined(ANGLE_PLATFORM_POSIX) || defined(__clang__)
+++#if defined(ANGLE_PLATFORM_POSIX) || defined(__clang__) || defined(__MINGW32__)
++ inline int BitCount(uint32_t bits)
++ {
++     return __builtin_popcount(bits);
++@@ -1083,7 +1083,7 @@ inline int BitCount(uint64_t bits)
++ {
++     return __builtin_popcountll(bits);
++ }
++-#endif  // defined(ANGLE_PLATFORM_POSIX) || defined(__clang__)
+++#endif  // defined(ANGLE_PLATFORM_POSIX) || defined(__clang__) || defined(__MINGW32__)
++ 
++ inline int BitCount(uint8_t bits)
++ {
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/angle_commit.h.in b/Meta/CMake/vcpkg/overlay-ports/angle/angle_commit.h.in
+new file mode 100644
+index 0000000000..e0dc787415
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/angle_commit.h.in
+@@ -0,0 +1,4 @@
++#cmakedefine ANGLE_COMMIT_HASH "@ANGLE_COMMIT_HASH@"
++#cmakedefine ANGLE_COMMIT_HASH_SIZE @ANGLE_COMMIT_HASH_SIZE@
++#cmakedefine ANGLE_COMMIT_DATE "@ANGLE_COMMIT_DATE@"
++#cmakedefine ANGLE_REVISION @ANGLE_REVISION@
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/CMakeLists.txt b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/CMakeLists.txt
+new file mode 100644
+index 0000000000..110c5a0975
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/CMakeLists.txt
+@@ -0,0 +1,477 @@
++cmake_minimum_required(VERSION 3.8)
++project(angle CXX C)
++
++set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
++include(WebKitCommon-minimal)
++
++set(ANGLE_FRAMEWORK_HEADERS_DIR "${CMAKE_BINARY_DIR}/ANGLE/headers")
++
++set(USE_ANGLE_EGL ON)
++if (NOT WINDOWS_STORE)
++    set(USE_OPENGL ON)
++endif()
++
++if(MSVC)
++    add_compile_options(/d2guard4 /Wv:18 /guard:cf /permissive /bigobj)
++    add_link_options(/guard:cf)
++endif()
++
++set(CMAKE_CXX_STANDARD 17)
++set(CMAKE_CXX_STANDARD_REQUIRED ON)
++set(CMAKE_POSITION_INDEPENDENT_CODE ON)
++
++set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS}")
++set(CMAKE_STATIC_LIBRARY_PREFIX "")
++if(WIN32)
++    set(CMAKE_SHARED_LIBRARY_PREFIX "")
++endif()
++
++if (WINDOWS_STORE)
++    set(WINRT_DEFINES -DANGLE_ENABLE_WINDOWS_UWP -DWINAPI_FAMILY=WINAPI_FAMILY_PC_APP)
++else()
++    set(WINRT_DEFINES)
++endif()
++add_definitions(
++    -D_CRT_SECURE_NO_DEPRECATE
++    -D_SCL_SECURE_NO_WARNINGS
++    -DGL_SILENCE_DEPRECATION
++    -D_HAS_EXCEPTIONS=0
++    -DNOMINMAX
++    -DANGLE_STANDALONE_BUILD
++    ${WINRT_DEFINES}
++)
++add_compile_options("$<$<CONFIG:DEBUG>:-DANGLE_ENABLE_DEBUG_ANNOTATIONS>")
++if(WIN32)
++    add_definitions(-DANGLE_IS_WIN)
++endif()
++if(LINUX)
++    add_definitions(-DANGLE_IS_LINUX)
++endif()
++if(ANGLE_IS_64_BIT_CPU)
++    add_definitions(-DANGLE_IS_64_BIT_CPU)
++elseif(ANGLE_IS_32_BIT_CPU)
++    add_definitions(-DANGLE_IS_32_BIT_CPU)
++endif()
++if(ANGLE_USE_D3D11_COMPOSITOR_NATIVE_WINDOW)
++    if(NOT WIN32)
++        message(FATAL_ERROR "ANGLE_USE_D3D11_COMPOSITOR_NATIVE_WINDOW is set, but is only supported on Windows")
++    endif()
++    set(angle_enable_d3d11_compositor_native_window TRUE)
++endif()
++if(NOT BUILD_SHARED_LIBS)
++    add_definitions(
++        -DANGLE_EXPORT=
++        -DANGLE_STATIC=1
++        -DANGLE_UTIL_EXPORT=
++        -DEGLAPI=
++        -DGL_APICALL=
++        -DGL_API=
++    )
++endif()
++
++find_package(ZLIB REQUIRED)
++
++##################################################
++
++# Derived from: https://github.com/WebKit/WebKit/blob/92dbcacf4c3e3a8fc6eea68e7022ca59401749e0/Source/ThirdParty/ANGLE/CMakeLists.txt
++# With modifications for vcpkg port (marked with "VCPKG EDIT:" comments)
++
++set_property(DIRECTORY . PROPERTY FOLDER "ANGLE")
++
++# VCPKG EDIT: modified block
++if (APPLE)
++    set(is_apple TRUE)
++    if (IOS)
++        set(is_ios TRUE)
++        if (USE_OPENGL)
++            set(angle_enable_eagl TRUE)
++        endif()
++    else()
++        set(is_mac TRUE)
++    endif()
++    if (USE_OPENGL AND NOT angle_enable_eagl)
++        set(angle_enable_cgl TRUE)
++    endif()
++elseif (WIN32)
++    set(is_win TRUE)
++    if (NOT WINDOWS_STORE)
++        set(angle_is_winuwp FALSE)
++    else()
++        set(angle_is_winuwp TRUE)
++        set(target_os "winuwp")
++    endif()
++    if (NOT angle_is_winuwp)
++        set(angle_enable_d3d9 TRUE)
++    endif()
++    set(angle_enable_d3d11 TRUE)
++elseif (UNIX)
++    set(is_linux TRUE)
++    if(LINUX)
++        set(angle_use_x11 TRUE)
++    endif()
++endif ()
++# VCPKG EDIT: end vcpkg modified block
++
++include(Compiler.cmake)
++include(GLESv2.cmake)
++
++# ANGLE Renderer backends
++include(D3D.cmake)
++include(GL.cmake)
++include(Metal.cmake)
++
++set(no_gl_prototypes
++    GL_GLES_PROTOTYPES=0
++    EGL_EGL_PROTOTYPES=0
++)
++
++set(gl_prototypes
++    GL_GLES_PROTOTYPES=1
++    EGL_EGL_PROTOTYPES=1
++    GL_GLEXT_PROTOTYPES
++    EGL_EGLEXT_PROTOTYPES
++)
++
++# Default library types for ANGLE
++# Override these in Platform*.cmake for your port as needed.
++set(ANGLE_LIBRARY_TYPE STATIC) # libANGLE static library (matches expected behavior & prior behavior)
++set(GLESv2_LIBRARY_TYPE) # VCPKG EDIT: Default to BUILD_SHARED_LIBS setting
++set(EGL_LIBRARY_TYPE) # VCPKG EDIT: Default to BUILD_SHARED_LIBS setting
++
++# ANGLE makes a number of small static libraries that are then joined into a
++# bigger library that is built shared. Rather than making the small libraries
++# there will be a ANGLE whose sources are dependent on whether the library
++# is being used as a compiler or as a GLES implementation.
++#
++# The corresponding gn targets are described below
++#
++# ANGLE (Compiler only)
++# + angle_common
++# + preprocessor
++# + translator
++#
++# ANGLE (GLES)
++# + ANGLE (Compiler only)
++# + xxhash
++# + angle_image_util
++# + angle_system_utils (OS specific)
++# + angle_(renderer) (Backend and OS specific)
++
++set(ANGLE_PRIVATE_INCLUDE_DIRECTORIES
++    "${CMAKE_CURRENT_SOURCE_DIR}/include"
++    "${CMAKE_CURRENT_SOURCE_DIR}/include/KHR"
++    "${CMAKE_CURRENT_SOURCE_DIR}/src"
++    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/third_party/base"
++    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/base"
++    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/third_party/xxhash"
++    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/zlib/google"
++    "${CMAKE_CURRENT_BINARY_DIR}/include"
++)
++
++set(ANGLE_DEFINITIONS
++    ANGLE_ENABLE_ESSL
++    ANGLE_ENABLE_GLSL
++)
++
++# VCPKG EDIT
++list(APPEND ANGLE_DEFINITIONS ANGLE_CAPTURE_ENABLED=0)
++if (NOT WIN32)
++    list(APPEND ANGLE_DEFINITIONS
++        "-DGL_API=__attribute__((visibility(\"default\")))"
++        "-DGL_APICALL=__attribute__((visibility(\"default\")))"
++    )
++endif()
++# END VCPKG EDIT
++
++set(ANGLE_SOURCES
++    ${libangle_common_sources}
++    ${libangle_common_shader_state_sources}
++    ${angle_preprocessor_sources}
++    ${angle_translator_glsl_base_sources}
++    ${angle_translator_essl_sources}
++    ${angle_translator_essl_symbol_table_sources}
++    ${angle_translator_glsl_and_vulkan_base_sources}
++    ${angle_translator_glsl_sources}
++    ${angle_translator_sources}
++    ${angle_system_utils_sources}
++    src/common/angle_version_info.cpp
++    src/libANGLE/capture/FrameCapture_mock.cpp
++    src/libANGLE/capture/serialize_mock.cpp
++)
++
++if (WIN32)
++    # FIXME: DX11 support will not compile if this preprocessor definition is set
++    # DirectX Documentation is setting that version to 0x700 but there is no
++    # corresponding value in sdkddkver.h
++    remove_definitions(-D_WIN32_WINNT=0x601 -DWINVER=0x601)
++
++    list(APPEND ANGLE_SOURCES
++        "src/libANGLE/renderer/dxgi_format_map.h"
++        "src/libANGLE/renderer/dxgi_format_map_autogen.cpp"
++        "src/libANGLE/renderer/dxgi_support_table.h"
++        "src/libANGLE/renderer/dxgi_support_table_autogen.cpp"
++    )
++    if (NOT angle_is_winuwp)
++        list(APPEND ANGLE_SOURCES
++            "src/libANGLE/renderer/d3d_format.cpp"
++            "src/libANGLE/renderer/d3d_format.h"
++        )
++    endif()
++endif ()
++
++set(ANGLEGLESv2_LIBRARIES
++    ANGLE
++)
++
++set(zlib_wrapper_sources
++    "third_party/zlib/google/compression_utils_portable.h"
++    "third_party/zlib/google/compression_utils_portable.cc"
++)
++
++set(angle_gl_enum_utils # VCPKG EDIT: Update paths
++    "src/common/gl_enum_utils.cpp"
++    "src/common/gl_enum_utils.h"
++    "src/common/gl_enum_utils_autogen.cpp"
++    "src/common/gl_enum_utils_autogen.h"
++)
++
++set(angle_glslang_wrapper
++    "src/libANGLE/renderer/ShaderInterfaceVariableInfoMap.cpp"
++    "src/libANGLE/renderer/ShaderInterfaceVariableInfoMap.h"
++    "src/libANGLE/renderer/glslang_wrapper_utils.cpp"
++    "src/libANGLE/renderer/glslang_wrapper_utils.h"
++)
++
++WEBKIT_INCLUDE_CONFIG_FILES_IF_EXISTS()
++
++add_subdirectory(include)
++
++add_library(ANGLEFramework INTERFACE)
++add_dependencies(ANGLEFramework GLSLANGHeaders ANGLEHeaders)
++
++if (USE_ANGLE_EGL OR ENABLE_WEBGL)
++    add_library(ANGLE ${ANGLE_LIBRARY_TYPE}
++        ${ANGLE_SOURCES}
++        ${libangle_sources}
++        ${libangle_headers}
++        ${libangle_image_util_sources}
++        ${libangle_image_util_headers}
++        ${xxhash_sources}
++        ${zlib_wrapper_sources}
++        ${angle_gl_enum_utils}
++    )
++    target_include_directories(ANGLE PRIVATE ${ANGLE_PRIVATE_INCLUDE_DIRECTORIES})
++    target_compile_definitions(ANGLE PRIVATE
++        ${no_gl_prototypes}
++        LIBANGLE_IMPLEMENTATION
++    )
++    target_compile_definitions(ANGLE PUBLIC ${ANGLE_DEFINITIONS})
++    target_link_libraries(ANGLE PRIVATE ZLIB::ZLIB ${CMAKE_DL_LIBS})
++
++    target_compile_definitions(ANGLEFramework INTERFACE ${gl_prototypes})
++
++    add_library(GLESv2 ${GLESv2_LIBRARY_TYPE}
++        ${libglesv2_sources}
++    )
++    target_include_directories(GLESv2 PRIVATE ${ANGLE_PRIVATE_INCLUDE_DIRECTORIES})
++    target_compile_definitions(GLESv2 PRIVATE 
++        ${no_gl_prototypes}
++        LIBGLESV2_IMPLEMENTATION
++    )
++
++    target_link_libraries(GLESv2 PRIVATE ${ANGLEGLESv2_LIBRARIES} ${CMAKE_DL_LIBS})
++
++    if (WIN32)
++        # Output library name according to the .def
++        target_sources(GLESv2 PRIVATE src/libGLESv2/libGLESv2_autogen.def)
++        set_target_properties(GLESv2 PROPERTIES OUTPUT_NAME libGLESv2)
++    endif ()
++    # Rename libs to avoid conflict with system OpenGL
++    if(NOT VCPKG_TARGET_IS_WINDOWS)
++        set_target_properties(GLESv2 PROPERTIES OUTPUT_NAME libGLESv2_angle)
++    endif()
++
++    add_library(GLESv2Framework INTERFACE)
++    target_link_libraries(GLESv2Framework INTERFACE GLESv2)
++    target_include_directories(GLESv2Framework INTERFACE ${ANGLE_FRAMEWORK_HEADERS_DIR})
++    target_compile_definitions(GLESv2Framework INTERFACE USE_SYSTEM_EGL)
++    add_library(ANGLE::GLES ALIAS GLESv2Framework)
++
++    if (USE_ANGLE_EGL)
++        add_library(EGL ${EGL_LIBRARY_TYPE}
++            ${libegl_sources}
++        )
++        target_include_directories(EGL PRIVATE ${ANGLE_PRIVATE_INCLUDE_DIRECTORIES})
++        target_compile_definitions(EGL PRIVATE
++            ${ANGLE_DEFINITIONS}
++            ${gl_prototypes}
++            EGLAPI=
++        )
++
++        target_link_libraries(EGL PRIVATE GLESv2 ${CMAKE_DL_LIBS})
++
++        set_target_properties(EGL PROPERTIES LINKER_LANGUAGE CXX)
++        if (WIN32)
++            # Output library names according to the .def
++            target_sources(EGL PRIVATE src/libEGL/libEGL_autogen.def)
++            set_target_properties(EGL PROPERTIES OUTPUT_NAME libEGL)
++        endif ()
++        # Rename libs to avoid conflict with system OpenGL
++        if(NOT VCPKG_TARGET_IS_WINDOWS)
++            set_target_properties(EGL PROPERTIES OUTPUT_NAME libEGL_angle)
++        endif()
++
++        add_library(EGLFramework INTERFACE)
++        target_include_directories(EGLFramework INTERFACE ${ANGLE_FRAMEWORK_HEADERS_DIR}/)
++        target_compile_definitions(EGLFramework INTERFACE ${gl_prototypes})
++        target_link_libraries(EGLFramework INTERFACE EGL)
++        add_library(ANGLE::EGL ALIAS EGLFramework)
++    endif ()
++else ()
++    add_library(ANGLE ${ANGLE_LIBRARY_TYPE} ${ANGLE_SOURCES})
++    target_include_directories(ANGLE PRIVATE ${ANGLE_PRIVATE_INCLUDE_DIRECTORIES})
++    target_link_libraries(ANGLE PRIVATE ${CMAKE_DL_LIBS})
++    target_compile_definitions(ANGLE PRIVATE
++        ${ANGLE_DEFINITIONS}
++        ${no_gl_prototypes}
++        LIBANGLE_IMPLEMENTATION
++    )
++endif ()
++
++if (ENABLE_WEBGL)
++    set(libglesv2_entry_points_headers
++        src/libGLESv2/entry_points_egl_autogen.h
++        src/libGLESv2/entry_points_egl_ext_autogen.h
++        src/libGLESv2/entry_points_gles_2_0_autogen.h
++        src/libGLESv2/entry_points_gles_3_0_autogen.h
++        src/libGLESv2/entry_points_gles_ext_autogen.h
++    )
++
++    WEBKIT_COPY_FILES(LibGLESv2EntryPointsHeaders
++        DESTINATION ${ANGLE_FRAMEWORK_HEADERS_DIR}/ANGLE
++        FILES ${libglesv2_entry_points_headers}
++        FLATTENED
++    )
++    if (WIN32 AND TARGET GLESv2)
++        # GLESv2 needs to have a direct or indirect dependency to
++        # LibGLESv2EntryPointsHeaders for CMake Visual Studio generator
++        # to eliminate duplicated custom commands. Otherwise,
++        # entry_points_*.h will be copied twice in both projects.
++        add_dependencies(GLESv2 LibGLESv2EntryPointsHeaders)
++    endif ()
++
++    add_custom_target(ANGLE-webgl-headers
++        DEPENDS LibGLESv2EntryPointsHeaders ANGLEWebGLHeaders
++        COMMAND ${CMAKE_COMMAND} -E env
++            BUILT_PRODUCTS_DIR=${ANGLE_FRAMEWORK_HEADERS_DIR}
++            PUBLIC_HEADERS_FOLDER_PATH=/ANGLE
++            ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/adjust-angle-include-paths.py
++        VERBATIM
++    )
++    add_dependencies(GLESv2Framework ANGLE-webgl-headers)
++endif ()
++
++if (COMPILER_IS_GCC_OR_CLANG)
++    foreach (angle_target ANGLE EGL GLESv2)
++        if (TARGET ${angle_target})
++            WEBKIT_ADD_TARGET_C_FLAGS(${angle_target} -w)
++            WEBKIT_ADD_TARGET_CXX_FLAGS(${angle_target} -w)
++        endif ()
++    endforeach ()
++endif ()
++
++target_link_libraries(ANGLEFramework INTERFACE ANGLE)
++target_include_directories(ANGLEFramework INTERFACE ${ANGLE_FRAMEWORK_HEADERS_DIR})
++
++add_library(ANGLE::ANGLE ALIAS ANGLEFramework)
++
++
++##################################################
++
++#### VCPKG EDIT:
++#### various vcpkg additions and install commands
++
++# X11 support
++if (angle_use_x11)
++    find_package(X11 COMPONENTS Xext Xi REQUIRED)
++    target_include_directories(ANGLE PRIVATE ${X11_INCLUDE_DIR})
++    target_sources(ANGLE PRIVATE ${libangle_gpu_info_util_x11_sources})
++    target_sources(ANGLE PRIVATE "src/gpu_info_util/SystemInfo_x11.cpp")
++    target_compile_definitions(ANGLE PRIVATE ANGLE_USE_X11 GPU_INFO_USE_X11)
++    target_link_libraries(ANGLE PRIVATE ${X11_LIBRARIES} X11::X11 X11::Xi X11::Xext)
++endif()
++
++# set export names of some targets to match prior vcpkg port buildsystem
++if(TARGET EGL)
++    set_target_properties(EGL PROPERTIES EXPORT_NAME libEGL)
++endif()
++if(TARGET GLESv2)
++    set_target_properties(GLESv2 PROPERTIES EXPORT_NAME libGLESv2)
++endif()
++set_target_properties(ANGLE PROPERTIES EXPORT_NAME libANGLE)
++
++set(_possibleTargets EGL GLESv2 ANGLE)
++foreach(_target IN LISTS _possibleTargets)
++    if(TARGET ${_target})
++        list(APPEND _installableTargets "${_target}")
++    endif()
++endforeach()
++
++install(TARGETS ${_installableTargets} EXPORT ANGLEExport
++    RUNTIME DESTINATION bin
++    LIBRARY DESTINATION lib
++    ARCHIVE DESTINATION lib
++)
++
++install(EXPORT ANGLEExport FILE unofficial-angle-targets.cmake NAMESPACE unofficial::angle:: DESTINATION share/unofficial-angle)
++install(FILES unofficial-angle-config.cmake DESTINATION share/unofficial-angle)
++
++install(
++    DIRECTORY "${ANGLE_FRAMEWORK_HEADERS_DIR}/"
++    DESTINATION include
++    FILES_MATCHING
++    PATTERN "*.h"
++    PATTERN "*.inc"
++    PATTERN "CL" EXCLUDE
++    PATTERN "GLSLANG" EXCLUDE
++    PATTERN "EGL/egl.h" EXCLUDE
++    PATTERN "EGL/eglext.h" EXCLUDE
++    PATTERN "EGL/eglplatform.h" EXCLUDE
++    PATTERN "KHR" EXCLUDE
++    PATTERN "WGL" EXCLUDE
++    PATTERN "export.h" EXCLUDE
++    PATTERN "GLES/egl.h" EXCLUDE
++    PATTERN "GLES/gl.h" EXCLUDE
++    PATTERN "GLES/glext.h" EXCLUDE
++    PATTERN "GLES/glplatform.h" EXCLUDE
++    PATTERN "GLES2/gl2.h" EXCLUDE
++    PATTERN "GLES2/gl2ext.h" EXCLUDE
++    PATTERN "GLES2/gl2platform.h" EXCLUDE
++    PATTERN "GLES3/gl3.h" EXCLUDE
++    PATTERN "GLES3/gl31.h" EXCLUDE
++    PATTERN "GLES3/gl32.h" EXCLUDE
++    PATTERN "GLES3/gl3platform.h" EXCLUDE
++)
++install(
++    DIRECTORY "${ANGLE_FRAMEWORK_HEADERS_DIR}/"
++    DESTINATION include/angle
++    FILES_MATCHING
++    PATTERN "*.h"
++    PATTERN "*.inc"
++    PATTERN "CL" EXCLUDE
++    PATTERN "GLSLANG" EXCLUDE
++    PATTERN "EGL/egl.h" EXCLUDE
++    PATTERN "EGL/eglext.h" EXCLUDE
++    PATTERN "EGL/eglplatform.h" EXCLUDE
++    PATTERN "KHR" EXCLUDE
++    PATTERN "WGL" EXCLUDE
++    PATTERN "export.h" EXCLUDE
++)
++
++if(NOT BUILD_SHARED_LIBS)
++    foreach(angle_target EGL GLESv2 ANGLE)
++        if(TARGET ${angle_target})
++            target_compile_definitions(${angle_target} INTERFACE $<INSTALL_INTERFACE:KHRONOS_STATIC>)
++        endif()
++    endforeach()
++endif()
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformLinux.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformLinux.cmake
+new file mode 100644
+index 0000000000..018bf7f85e
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformLinux.cmake
+@@ -0,0 +1,30 @@
++list(APPEND ANGLE_DEFINITIONS ANGLE_PLATFORM_LINUX USE_SYSTEM_EGL)
++include(linux.cmake)
++
++if (USE_OPENGL)
++    # Enable GLSL compiler output.
++    list(APPEND ANGLE_DEFINITIONS ANGLE_ENABLE_GLSL)
++endif ()
++
++if (USE_ANGLE_EGL OR ENABLE_WEBGL)
++    list(APPEND ANGLE_SOURCES
++        ${_gl_backend_sources}
++
++        ${angle_system_utils_sources_linux}
++        ${angle_system_utils_sources_posix}
++
++        ${angle_dma_buf_sources}
++
++        ${libangle_gl_egl_dl_sources}
++        ${libangle_gl_egl_sources}
++        ${libangle_gl_sources}
++
++        ${libangle_gpu_info_util_sources}
++        ${libangle_gpu_info_util_linux_sources}
++    )
++
++    list(APPEND ANGLE_DEFINITIONS
++        ANGLE_ENABLE_OPENGL
++    )
++
++endif ()
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformMac.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformMac.cmake
+new file mode 100644
+index 0000000000..4fda2ba46b
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformMac.cmake
+@@ -0,0 +1,59 @@
++find_package(ZLIB REQUIRED)
++
++list(APPEND ANGLE_SOURCES
++    ${libangle_gpu_info_util_mac_sources}
++    ${libangle_gpu_info_util_sources}
++    ${libangle_mac_sources}
++)
++
++list(APPEND ANGLEGLESv2_LIBRARIES
++    "-framework CoreGraphics"
++    "-framework Foundation"
++    "-framework IOKit"
++    "-framework IOSurface"
++    "-framework Quartz"
++)
++
++# Metal backend
++if(USE_METAL)
++    list(APPEND ANGLE_SOURCES
++        ${_metal_backend_sources}
++
++        ${angle_translator_lib_metal_sources}
++    
++        ${angle_glslang_wrapper}
++    )
++
++    list(APPEND ANGLE_DEFINITIONS
++        ANGLE_ENABLE_METAL
++    )
++
++    list(APPEND ANGLEGLESv2_LIBRARIES
++        "-framework Metal"
++    )
++endif()
++
++# OpenGL backend
++if(USE_OPENGL)
++    list(APPEND ANGLE_SOURCES
++        ${angle_translator_glsl_base_sources}
++        ${angle_translator_glsl_sources}
++        ${angle_translator_apple_sources}
++    )
++    # Enable GLSL compiler output.
++    list(APPEND ANGLE_DEFINITIONS ANGLE_ENABLE_GLSL ANGLE_ENABLE_GL_DESKTOP_BACKEND ANGLE_ENABLE_APPLE_WORKAROUNDS)
++endif()
++
++if(USE_ANGLE_EGL OR ENABLE_WEBGL)
++    list(APPEND ANGLE_SOURCES
++        ${_gl_backend_sources}
++
++        ${libangle_gl_egl_dl_sources}
++        ${libangle_gl_egl_sources}
++        ${libangle_gl_sources}
++    )
++
++    list(APPEND ANGLE_DEFINITIONS
++        ANGLE_ENABLE_OPENGL
++    )
++endif()
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformWin.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformWin.cmake
+new file mode 100644
+index 0000000000..97ac61915f
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformWin.cmake
+@@ -0,0 +1,67 @@
++# We're targeting Windows 10 which will have DirectX 11 on it so require that
++# but make DirectX 9 optional
++
++list(APPEND ANGLE_DEFINITIONS
++    GL_APICALL=
++    GL_API=
++    NOMINMAX
++)
++
++# We're targeting Windows 10 which will have DirectX 11
++list(APPEND ANGLE_SOURCES
++    ${_d3d11_backend_sources}
++    ${_d3d_shared_sources}
++
++    ${angle_translator_hlsl_sources}
++
++    ${libangle_gpu_info_util_sources}
++    ${libangle_gpu_info_util_win_sources}
++)
++
++list(APPEND ANGLE_DEFINITIONS
++    ANGLE_ENABLE_D3D11
++    ANGLE_ENABLE_HLSL
++    # VCPKG EDIT: add ANGLE_PRELOADED_D3DCOMPILER_MODULE_NAMES
++    "-DANGLE_PRELOADED_D3DCOMPILER_MODULE_NAMES={ \"d3dcompiler_47.dll\", \"d3dcompiler_46.dll\", \"d3dcompiler_43.dll\" }"
++)
++
++list(APPEND ANGLEGLESv2_LIBRARIES dxguid dxgi)
++
++if(NOT angle_is_winuwp) # vcpkg EDIT: Exclude DirectX 9 on UWP
++    # DirectX 9 support should be optional but ANGLE will not compile without it
++    list(APPEND ANGLE_SOURCES ${_d3d9_backend_sources})
++    list(APPEND ANGLE_DEFINITIONS ANGLE_ENABLE_D3D9)
++    list(APPEND ANGLEGLESv2_LIBRARIES d3d9)
++endif()
++
++# VCPKG EDITS:
++
++# Do not specify library type here
++
++# Handle angle_enable_d3d11_compositor_native_window defines
++
++if(angle_enable_d3d11_compositor_native_window)
++	list(APPEND ANGLE_DEFINITIONS ANGLE_ENABLE_D3D11_COMPOSITOR_NATIVE_WINDOW)
++endif()
++
++# OpenGL backend
++
++if(USE_OPENGL)
++    # Enable GLSL compiler output.
++    list(APPEND ANGLE_DEFINITIONS ANGLE_ENABLE_GLSL)
++
++    if(USE_ANGLE_EGL OR ENABLE_WEBGL)
++        list(APPEND ANGLE_SOURCES
++            ${_gl_backend_sources}
++
++            ${libangle_gl_egl_dl_sources}
++            ${libangle_gl_egl_sources}
++            ${libangle_gl_sources}
++        )
++
++        list(APPEND ANGLE_DEFINITIONS
++            ANGLE_ENABLE_OPENGL
++            ANGLE_ENABLE_GL_DESKTOP_BACKEND
++        )
++    endif()
++endif()
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/cmake/WebKitCommon-minimal.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/cmake/WebKitCommon-minimal.cmake
+new file mode 100644
+index 0000000000..b0df91f953
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/cmake/WebKitCommon-minimal.cmake
+@@ -0,0 +1,192 @@
++# VCPKG NOTE: A minimal version of WebKit's https://github.com/WebKit/WebKit/blob/647e67b23883960fef8890465c0f70d7ab6e63f1/Source/cmake/WebKitCommon.cmake
++# To support the adapted ANGLE CMake buildsystem
++
++# -----------------------------------------------------------------------------
++# This file is included individually from various subdirectories (JSC, WTF,
++# WebCore, WebKit) in order to allow scripts to build only part of WebKit.
++# We want to run this file only once.
++# -----------------------------------------------------------------------------
++if (NOT HAS_RUN_WEBKIT_COMMON)
++    set(HAS_RUN_WEBKIT_COMMON TRUE)
++
++    if (NOT CMAKE_BUILD_TYPE)
++        message(WARNING "No CMAKE_BUILD_TYPE value specified, defaulting to RelWithDebInfo.")
++        set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "Choose the type of build." FORCE)
++    else ()
++        message(STATUS "The CMake build type is: ${CMAKE_BUILD_TYPE}")
++    endif ()
++
++    # -----------------------------------------------------------------------------
++    # Determine which port will be built
++    # -----------------------------------------------------------------------------
++    set(ALL_PORTS
++        AppleWin
++        Efl
++        FTW
++        GTK
++        JSCOnly
++        Mac
++        PlayStation
++        WPE
++        WinCairo
++        Linux # VCPKG EDIT: Add "Linux" so it's properly supported for ANGLE build
++        Win # VCPKG EDIT: Add "Win" so it's properly supported for ANGLE build
++    )
++    set(PORT "NOPORT" CACHE STRING "choose which WebKit port to build (one of ${ALL_PORTS})")
++
++    list(FIND ALL_PORTS ${PORT} RET)
++    if (${RET} EQUAL -1)
++        if (APPLE)
++            set(PORT "Mac")
++        else ()
++            message(WARNING "Please choose which WebKit port to build (one of ${ALL_PORTS})")
++        endif ()
++    endif ()
++
++    string(TOLOWER ${PORT} WEBKIT_PORT_DIR)
++
++    # -----------------------------------------------------------------------------
++    # Determine the compiler
++    # -----------------------------------------------------------------------------
++    if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL "AppleClang")
++        set(COMPILER_IS_CLANG ON)
++    endif ()
++
++    if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
++        if (${CMAKE_CXX_COMPILER_VERSION} VERSION_LESS "9.3.0")
++            message(FATAL_ERROR "GCC 9.3 or newer is required to build WebKit. Use a newer GCC version or Clang.")
++        endif ()
++    endif ()
++
++    if (CMAKE_COMPILER_IS_GNUCXX OR COMPILER_IS_CLANG)
++        set(COMPILER_IS_GCC_OR_CLANG ON)
++    endif ()
++
++    if (MSVC AND COMPILER_IS_CLANG)
++        set(COMPILER_IS_CLANG_CL ON)
++    endif ()
++
++    # -----------------------------------------------------------------------------
++    # Determine the target processor
++    # -----------------------------------------------------------------------------
++    # Use MSVC_CXX_ARCHITECTURE_ID instead of CMAKE_SYSTEM_PROCESSOR when defined,
++    # since the later one just resolves to the host processor on Windows.
++    if (MSVC_CXX_ARCHITECTURE_ID)
++        string(TOLOWER ${MSVC_CXX_ARCHITECTURE_ID} LOWERCASE_CMAKE_SYSTEM_PROCESSOR)
++    else ()
++        string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR} LOWERCASE_CMAKE_SYSTEM_PROCESSOR)
++    endif ()
++    if (LOWERCASE_CMAKE_SYSTEM_PROCESSOR MATCHES "(^aarch64|^arm64|^cortex-?[am][2-7][2-8])")
++        set(WTF_CPU_ARM64 1)
++    elseif (LOWERCASE_CMAKE_SYSTEM_PROCESSOR MATCHES "(^arm|^cortex)")
++        set(WTF_CPU_ARM 1)
++    elseif (LOWERCASE_CMAKE_SYSTEM_PROCESSOR MATCHES "^mips64")
++        set(WTF_CPU_MIPS64 1)
++    elseif (LOWERCASE_CMAKE_SYSTEM_PROCESSOR MATCHES "^mips")
++        set(WTF_CPU_MIPS 1)
++    elseif (LOWERCASE_CMAKE_SYSTEM_PROCESSOR MATCHES "(x64|x86_64|amd64)")
++        # FORCE_32BIT is set in the build script when --32-bit is passed
++        # on a Linux/intel 64bit host. This allows us to produce 32bit
++        # binaries without setting the build up as a crosscompilation,
++        # which is the only way to modify CMAKE_SYSTEM_PROCESSOR.
++        if (FORCE_32BIT)
++            set(WTF_CPU_X86 1)
++        else ()
++            set(WTF_CPU_X86_64 1)
++        endif ()
++    elseif (LOWERCASE_CMAKE_SYSTEM_PROCESSOR MATCHES "(i[3-6]86|x86)")
++        set(WTF_CPU_X86 1)
++    elseif (LOWERCASE_CMAKE_SYSTEM_PROCESSOR MATCHES "ppc")
++        set(WTF_CPU_PPC 1)
++    elseif (LOWERCASE_CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64")
++        set(WTF_CPU_PPC64 1)
++    elseif (LOWERCASE_CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
++        set(WTF_CPU_PPC64LE 1)
++    elseif (LOWERCASE_CMAKE_SYSTEM_PROCESSOR MATCHES "^riscv64")
++        set(WTF_CPU_RISCV64 1)
++    elseif (LOWERCASE_CMAKE_SYSTEM_PROCESSOR MATCHES "^loongarch64")
++        set(WTF_CPU_LOONGARCH64 1)
++    else ()
++        set(WTF_CPU_UNKNOWN 1)
++    endif ()
++
++    # -----------------------------------------------------------------------------
++    # Determine the operating system
++    # -----------------------------------------------------------------------------
++    if (UNIX)
++        if (APPLE)
++            set(WTF_OS_MAC_OS_X 1)
++        elseif (CMAKE_SYSTEM_NAME MATCHES "Linux")
++            set(WTF_OS_LINUX 1)
++        else ()
++            set(WTF_OS_UNIX 1)
++        endif ()
++    elseif (CMAKE_SYSTEM_NAME MATCHES "Windows")
++        set(WTF_OS_WINDOWS 1)
++    elseif (CMAKE_SYSTEM_NAME MATCHES "Fuchsia")
++        set(WTF_OS_FUCHSIA 1)
++    else ()
++        message(FATAL_ERROR "Unknown OS '${CMAKE_SYSTEM_NAME}'")
++    endif ()
++
++    # -----------------------------------------------------------------------------
++    # Default library types
++    # -----------------------------------------------------------------------------
++
++    set(CMAKE_POSITION_INDEPENDENT_CODE True)
++
++    # -----------------------------------------------------------------------------
++    # Default output directories, which can be overwritten by ports
++    #------------------------------------------------------------------------------
++    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
++    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
++    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
++
++    # -----------------------------------------------------------------------------
++    # Find common packages (used by all ports)
++    # -----------------------------------------------------------------------------
++    if (WIN32)
++        list(APPEND CMAKE_PROGRAM_PATH $ENV{SystemDrive}/cygwin/bin)
++    endif ()
++
++    # -----------------------------------------------------------------------------
++    # Helper macros and feature defines
++    # -----------------------------------------------------------------------------
++
++    # To prevent multiple inclusion, most modules should be included once here.
++    include(CheckCCompilerFlag)
++    include(CheckCXXCompilerFlag)
++    include(CheckCXXSourceCompiles)
++    include(CheckFunctionExists)
++    include(CheckIncludeFile)
++    include(CheckSymbolExists)
++    include(CheckStructHasMember)
++    include(CheckTypeSize)
++    include(CMakeDependentOption)
++    include(CMakeParseArguments)
++    include(CMakePushCheckState)
++    include(ProcessorCount)
++
++    # include(WebKitPackaging)
++    include(WebKitMacros)
++    # include(WebKitFS)
++    # include(WebKitCCache)
++    include(WebKitCompilerFlags)
++    # include(WebKitStaticAnalysis)
++    # include(WebKitFeatures)
++    # include(WebKitFindPackage)
++
++    # include(OptionsCommon)
++    # include(Options${PORT})
++
++    # -----------------------------------------------------------------------------
++    # Job pool to avoid running too many memory hungry linker processes
++    # -----------------------------------------------------------------------------
++    if (${CMAKE_BUILD_TYPE} STREQUAL "Release" OR ${CMAKE_BUILD_TYPE} STREQUAL "MinSizeRel")
++        set_property(GLOBAL PROPERTY JOB_POOLS link_pool_jobs=4)
++    else ()
++        set_property(GLOBAL PROPERTY JOB_POOLS link_pool_jobs=2)
++    endif ()
++    set(CMAKE_JOB_POOL_LINK link_pool_jobs)
++
++endif ()
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/linux.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/linux.cmake
+new file mode 100644
+index 0000000000..f3d9cc06e0
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/linux.cmake
+@@ -0,0 +1,6 @@
++if(is_android OR is_linux OR is_chromeos)
++  set(angle_dma_buf_sources
++    "src/common/linux/dma_buf_utils.cpp"
++    "src/common/linux/dma_buf_utils.h"
++  )
++endif()
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake
+new file mode 100644
+index 0000000000..01c1d7166b
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake
+@@ -0,0 +1,193 @@
++if (VCPKG_TARGET_IS_LINUX)
++    message(WARNING "Building with a gcc version less than 6.1 is not supported.")
++    message(WARNING "${PORT} currently requires the following libraries from the system package manager:\n    libx11-dev\n    mesa-common-dev\n    libxi-dev\n    libxext-dev\n\nThese can be installed on Ubuntu systems via apt-get install libx11-dev mesa-common-dev libxi-dev libxext-dev.")
++endif()
++
++if (VCPKG_TARGET_ARCHITECTURE STREQUAL "x86")
++    set(ANGLE_CPU_BITNESS ANGLE_IS_32_BIT_CPU)
++elseif (VCPKG_TARGET_ARCHITECTURE STREQUAL "x64")
++    set(ANGLE_CPU_BITNESS ANGLE_IS_64_BIT_CPU)
++elseif (VCPKG_TARGET_ARCHITECTURE STREQUAL "arm")
++    set(ANGLE_CPU_BITNESS ANGLE_IS_32_BIT_CPU)
++elseif (VCPKG_TARGET_ARCHITECTURE STREQUAL "arm64")
++    set(ANGLE_CPU_BITNESS ANGLE_IS_64_BIT_CPU)
++else()
++    message(FATAL_ERROR "Unsupported architecture: ${VCPKG_TARGET_ARCHITECTURE}")
++endif()
++
++set(ANGLE_USE_D3D11_COMPOSITOR_NATIVE_WINDOW "OFF")
++if (VCPKG_TARGET_IS_WINDOWS OR VCPKG_TARGET_IS_UWP)
++  set(ANGLE_BUILDSYSTEM_PORT "Win")
++  if (NOT VCPKG_TARGET_IS_MINGW)
++    set(ANGLE_USE_D3D11_COMPOSITOR_NATIVE_WINDOW "ON")
++  endif()
++elseif (VCPKG_TARGET_IS_OSX)
++  set(ANGLE_BUILDSYSTEM_PORT "Mac")
++elseif (VCPKG_TARGET_IS_LINUX)
++  set(ANGLE_BUILDSYSTEM_PORT "Linux")
++else()
++  # default other platforms to "Linux" config
++  set(ANGLE_BUILDSYSTEM_PORT "Linux")
++endif()
++
++# chromium/5414
++set(ANGLE_COMMIT aa63ea230e0c507e7b4b164a30e502fb17168c17)
++set(ANGLE_VERSION 5414)
++set(ANGLE_SHA512 a3b55d4b484e1e9ece515d60af1d47a80a0576b198d9a2397e4e68b16efd83468dcdfadc98dae57ff17f01d02d74526f8b59fdf00661b70a45b6dd266e5ffe38)
++set(ANGLE_THIRDPARTY_ZLIB_COMMIT 44d9b490c721abdb923d5c6c23ac211e45ffb1a5)
++
++vcpkg_from_github(
++    OUT_SOURCE_PATH SOURCE_PATH
++    REPO google/angle
++    REF ${ANGLE_COMMIT}
++    SHA512 ${ANGLE_SHA512}
++    # On update check headers against opengl-registry
++    PATCHES
++        001-fix-uwp.patch
++        002-fix-builder-error.patch
++        003-fix-mingw.patch
++)
++
++# Generate angle_commit.h
++set(ANGLE_COMMIT_HASH_SIZE 12)
++string(SUBSTRING "${ANGLE_COMMIT}" 0 ${ANGLE_COMMIT_HASH_SIZE} ANGLE_COMMIT_HASH)
++set(ANGLE_COMMIT_DATE "invalid-date")
++set(ANGLE_REVISION "${ANGLE_VERSION}")
++configure_file("${CMAKE_CURRENT_LIST_DIR}/angle_commit.h.in" "${SOURCE_PATH}/angle_commit.h" @ONLY)
++configure_file("${CMAKE_CURRENT_LIST_DIR}/angle_commit.h.in" "${SOURCE_PATH}/src/common/angle_commit.h" @ONLY)
++file(COPY "${CMAKE_CURRENT_LIST_DIR}/unofficial-angle-config.cmake" DESTINATION "${SOURCE_PATH}")
++
++set(ANGLE_WEBKIT_BUILDSYSTEM_COMMIT "bb1da00b9ba878d228a5e9834a0767dbca2fee43")
++
++# Download WebKit gni-to-cmake.py conversion script
++vcpkg_download_distfile(GNI_TO_CMAKE_PY
++    URLS "https://github.com/WebKit/WebKit/raw/${ANGLE_WEBKIT_BUILDSYSTEM_COMMIT}/Source/ThirdParty/ANGLE/gni-to-cmake.py"
++    FILENAME "gni-to-cmake.py"
++    SHA512 9da35caf2db2e849d6cc85721ba0b77eee06b6f65a7c5314fb80483db4949b0b6e9bf4b2d4fc63613665629b24e9b052e03fb1451b09313d881297771a4f2736
++)
++
++# Generate CMake files from GN / GNI files
++vcpkg_find_acquire_program(PYTHON3)
++
++set(_root_gni_files_to_convert
++  "compiler.gni Compiler.cmake"
++  "libGLESv2.gni GLESv2.cmake"
++)
++set(_renderer_gn_files_to_convert
++  "libANGLE/renderer/d3d/BUILD.gn D3D.cmake"
++  "libANGLE/renderer/gl/BUILD.gn GL.cmake"
++  "libANGLE/renderer/metal/BUILD.gn Metal.cmake"
++)
++
++foreach(_root_gni_file IN LISTS _root_gni_files_to_convert)
++  separate_arguments(_file_values UNIX_COMMAND "${_root_gni_file}")
++  list(GET _file_values 0 _src_gn_file)
++  list(GET _file_values 1 _dst_file)
++  vcpkg_execute_required_process(
++      COMMAND "${PYTHON3}" "${GNI_TO_CMAKE_PY}" "src/${_src_gn_file}" "${_dst_file}"
++      WORKING_DIRECTORY "${SOURCE_PATH}"
++      LOGNAME "gni-to-cmake-${_dst_file}-${TARGET_TRIPLET}"
++  )
++endforeach()
++
++foreach(_renderer_gn_file IN LISTS _renderer_gn_files_to_convert)
++  separate_arguments(_file_values UNIX_COMMAND "${_renderer_gn_file}")
++  list(GET _file_values 0 _src_gn_file)
++  list(GET _file_values 1 _dst_file)
++  get_filename_component(_src_dir "${_src_gn_file}" DIRECTORY)
++  vcpkg_execute_required_process(
++      COMMAND "${PYTHON3}" "${GNI_TO_CMAKE_PY}" "src/${_src_gn_file}" "${_dst_file}" --prepend "src/${_src_dir}/"
++      WORKING_DIRECTORY "${SOURCE_PATH}"
++      LOGNAME "gni-to-cmake-${_dst_file}-${TARGET_TRIPLET}"
++  )
++endforeach()
++
++# Fetch additional CMake files from WebKit ANGLE buildsystem
++vcpkg_download_distfile(WK_ANGLE_INCLUDE_CMAKELISTS
++    URLS "https://github.com/WebKit/WebKit/raw/${ANGLE_WEBKIT_BUILDSYSTEM_COMMIT}/Source/ThirdParty/ANGLE/include/CMakeLists.txt"
++    FILENAME "include_CMakeLists.txt"
++    SHA512 a7ddf3c6df7565e232f87ec651cc4fd84240b8866609e23e3e6e41d22532fd34c70e0f3b06120fd3d6d930ca29c1d0d470d4c8cb7003a66f8c1a840a42f32949
++)
++configure_file("${WK_ANGLE_INCLUDE_CMAKELISTS}" "${SOURCE_PATH}/include/CMakeLists.txt" COPYONLY)
++
++vcpkg_download_distfile(WK_ANGLE_CMAKE_WEBKITCOMPILERFLAGS
++    URLS "https://github.com/WebKit/WebKit/raw/${ANGLE_WEBKIT_BUILDSYSTEM_COMMIT}/Source/cmake/WebKitCompilerFlags.cmake"
++    FILENAME "WebKitCompilerFlags.cmake"
++    SHA512 63f981694ae37d4c4ca4c34e2bf62b4d4602b6a1a660851304fa7a6ee834fc58fa6730eeb41ef4e075550f3c8b675823d4d00bdcd72ca869c6d5ab11196b33bb
++)
++file(COPY "${WK_ANGLE_CMAKE_WEBKITCOMPILERFLAGS}" DESTINATION "${SOURCE_PATH}/cmake")
++
++vcpkg_download_distfile(WK_ANGLE_CMAKE_DETECTSSE2
++    URLS "https://github.com/WebKit/WebKit/raw/${ANGLE_WEBKIT_BUILDSYSTEM_COMMIT}/Source/cmake/DetectSSE2.cmake"
++    FILENAME "DetectSSE2.cmake"
++    SHA512 219a4c8591ee31d11eb3d1e4803cc3c9d4573984bb25ecac6f2c76e6a3dab598c00b0157d0f94b18016de6786e49d8b29a161693a5ce23d761c8fe6a798c1bca
++)
++file(COPY "${WK_ANGLE_CMAKE_DETECTSSE2}" DESTINATION "${SOURCE_PATH}/cmake")
++
++vcpkg_download_distfile(WK_ANGLE_CMAKE_WEBKITMACROS
++    URLS "https://github.com/WebKit/WebKit/raw/${ANGLE_WEBKIT_BUILDSYSTEM_COMMIT}/Source/cmake/WebKitMacros.cmake"
++    FILENAME "WebKitMacros.cmake"
++    SHA512 0d126b1d1b0ca995c2ea6e51c73326db363f560f3f07912ce58c7c022d9257d27b963dac56aee0e9604ca7a3d74c5aa9f0451c243fec922fb485dd2253685ab6
++)
++file(COPY "${WK_ANGLE_CMAKE_WEBKITMACROS}" DESTINATION "${SOURCE_PATH}/cmake")
++
++# Copy additional custom CMake buildsystem into appropriate folders
++file(GLOB MAIN_BUILDSYSTEM "${CMAKE_CURRENT_LIST_DIR}/cmake-buildsystem/CMakeLists.txt" "${CMAKE_CURRENT_LIST_DIR}/cmake-buildsystem/*.cmake")
++file(COPY ${MAIN_BUILDSYSTEM} DESTINATION "${SOURCE_PATH}")
++file(GLOB MODULES "${CMAKE_CURRENT_LIST_DIR}/cmake-buildsystem/cmake/*.cmake")
++file(COPY ${MODULES} DESTINATION "${SOURCE_PATH}/cmake")
++
++function(checkout_in_path PATH URL REF)
++    if(EXISTS "${PATH}")
++        return()
++    endif()
++
++    vcpkg_from_git(
++        OUT_SOURCE_PATH DEP_SOURCE_PATH
++        URL "${URL}"
++        REF "${REF}"
++    )
++    file(RENAME "${DEP_SOURCE_PATH}" "${PATH}")
++    file(REMOVE_RECURSE "${DEP_SOURCE_PATH}")
++endfunction()
++
++checkout_in_path(
++    "${SOURCE_PATH}/third_party/zlib"
++    "https://chromium.googlesource.com/chromium/src/third_party/zlib"
++    "${ANGLE_THIRDPARTY_ZLIB_COMMIT}"
++)
++
++vcpkg_cmake_configure(
++    SOURCE_PATH "${SOURCE_PATH}"
++    OPTIONS_DEBUG -DDISABLE_INSTALL_HEADERS=1
++    OPTIONS
++        "-D${ANGLE_CPU_BITNESS}=1"
++        "-DPORT=${ANGLE_BUILDSYSTEM_PORT}"
++        "-DANGLE_USE_D3D11_COMPOSITOR_NATIVE_WINDOW=${ANGLE_USE_D3D11_COMPOSITOR_NATIVE_WINDOW}"
++        "-DVCPKG_TARGET_IS_WINDOWS=${VCPKG_TARGET_IS_WINDOWS}"
++)
++
++vcpkg_cmake_install()
++
++vcpkg_cmake_config_fixup(CONFIG_PATH share/unofficial-angle PACKAGE_NAME unofficial-angle)
++
++vcpkg_copy_pdbs()
++
++file(INSTALL "${SOURCE_PATH}/LICENSE" DESTINATION "${CURRENT_PACKAGES_DIR}/share/${PORT}" RENAME copyright)
++
++file(REMOVE_RECURSE "${CURRENT_PACKAGES_DIR}/debug/include")
++# Remove empty directories inside include directory
++file(GLOB directory_children RELATIVE "${CURRENT_PACKAGES_DIR}/include" "${CURRENT_PACKAGES_DIR}/include/*")
++foreach(directory_child ${directory_children})
++    if(IS_DIRECTORY "${CURRENT_PACKAGES_DIR}/include/${directory_child}")
++        file(GLOB_RECURSE subdirectory_children "${CURRENT_PACKAGES_DIR}/include/${directory_child}/*")
++        if("${subdirectory_children}" STREQUAL "")
++            file(REMOVE_RECURSE "${CURRENT_PACKAGES_DIR}/include/${directory_child}")
++        endif()
++    endif()
++endforeach()
++unset(subdirectory_children)
++unset(directory_child)
++unset(directory_children)
++
++file(INSTALL "${CMAKE_CURRENT_LIST_DIR}/usage" DESTINATION "${CURRENT_PACKAGES_DIR}/share/${PORT}")
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/unofficial-angle-config.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/unofficial-angle-config.cmake
+new file mode 100644
+index 0000000000..79abf89d78
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/unofficial-angle-config.cmake
+@@ -0,0 +1,7 @@
++include(CMakeFindDependencyMacro)
++find_dependency(ZLIB)
++if(UNIX AND NOT APPLE)
++  find_dependency(X11 COMPONENTS Xext Xi)
++endif()
++
++include("${CMAKE_CURRENT_LIST_DIR}/unofficial-angle-targets.cmake")
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/usage b/Meta/CMake/vcpkg/overlay-ports/angle/usage
+new file mode 100644
+index 0000000000..b1fdc146a1
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/usage
+@@ -0,0 +1,8 @@
++The package angle provides unofficial CMake targets:
++
++    find_package(unofficial-angle REQUIRED CONFIG)
++    target_link_libraries(main PRIVATE unofficial::angle::libGLESv2)
++
++    # Or use the EGL target
++    find_package(unofficial-angle REQUIRED CONFIG)
++    target_link_libraries(main PRIVATE unofficial::angle::libEGL)
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/vcpkg.json b/Meta/CMake/vcpkg/overlay-ports/angle/vcpkg.json
+new file mode 100644
+index 0000000000..a42d9356b2
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/vcpkg.json
+@@ -0,0 +1,36 @@
++{
++  "name": "angle",
++  "version-string": "chromium_5414",
++  "port-version": 9,
++  "description": [
++    "A conformant OpenGL ES implementation for Windows, Mac and Linux.",
++    "The goal of ANGLE is to allow users of multiple operating systems to seamlessly run WebGL and other OpenGL ES content by translating OpenGL ES API calls to one of the hardware-supported APIs available for that platform. ANGLE currently provides translation from OpenGL ES 2.0 and 3.0 to desktop OpenGL, OpenGL ES, Direct3D 9, and Direct3D 11. Support for translation from OpenGL ES to Vulkan is underway, and future plans include compute shader support (ES 3.1) and MacOS support."
++  ],
++  "homepage": "https://github.com/google/angle",
++  "license": "BSD-3-Clause",
++  "dependencies": [
++    "egl-registry",
++    {
++      "name": "libx11",
++      "platform": "linux"
++    },
++    {
++      "name": "libxext",
++      "platform": "linux"
++    },
++    {
++      "name": "libxi",
++      "platform": "linux"
++    },
++    "opengl-registry",
++    {
++      "name": "vcpkg-cmake",
++      "host": true
++    },
++    {
++      "name": "vcpkg-cmake-config",
++      "host": true
++    },
++    "zlib"
++  ]
++}
+-- 
+2.39.5
+

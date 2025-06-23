@@ -1,0 +1,30 @@
+From 313dfcf1080a0d9ec36dfc70c927c8eeac307672 Mon Sep 17 00:00:00 2001
+From: sg <sg@debian>
+Date: Sun, 30 Mar 2025 17:13:31 +0200
+Subject: [PATCH 08/11] Existence check is too easily foiled
+
+New versions apparently always create an empty folder.
+The check thinks that everything exists and so doesn't
+checkout anything, leading to errors later on.
+---
+ Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake
+index 020923ae83..e28bfee842 100644
+--- a/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake
+@@ -147,10 +147,6 @@ file(GLOB MODULES "${CMAKE_CURRENT_LIST_DIR}/cmake-buildsystem/cmake/*.cmake")
+ file(COPY ${MODULES} DESTINATION "${SOURCE_PATH}/cmake")
+ 
+ function(checkout_in_path PATH URL REF)
+-    if(EXISTS "${PATH}")
+-        return()
+-    endif()
+-
+     vcpkg_from_git(
+         OUT_SOURCE_PATH DEP_SOURCE_PATH
+         URL "${URL}"
+-- 
+2.39.5
+

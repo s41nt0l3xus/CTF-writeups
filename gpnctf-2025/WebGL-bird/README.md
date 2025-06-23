@@ -28,7 +28,7 @@ Along the way, I used a language model (`GPT-o3`) to help audit source code for 
 
 Since the challenge involves real, still-undisclosed vulnerabilities in the Ladybird browser, I trust that sharing a public exploitation guide won’t cause harm.
 
-Naturally, everything here is for educational and entertainment purposes only. Don’t go popping shells in your weird friend’s `Ladybird` browser — unless it’s to help them patch it… or maybe just for a harmless little joke.
+Naturally, everything here is for educational and entertainment purposes only. Don’t go popping shells in your weird friend’s `Ladybird` browser - unless it’s to help them patch it… or maybe just for a harmless little joke.
 
 ## Vulnerabilities
 
@@ -36,7 +36,7 @@ Naturally, everything here is for educational and entertainment purposes only. D
 
 ### First Look
 
-So, let's start. In this task, we’re given a Docker environment with the Ladybird browser already running. Judging by the patches the author applied to make it work in this setup, we probably just want to thank him sincerely for giving us a ready-to-go environment.
+So, let's start. In this task, we’re given a Docker environment with the Ladybird browser already running. Judging by the [patches](./task/patches/) the author applied to make it work in this setup, we probably just want to thank him sincerely for giving us a ready-to-go environment.
 
 The browser binaries used in this task are built from a known commit, which we can find in the author's [Dockerfile](./task/Dockerfile). According to the task description, the vulnerabilities are still present in the master branch (and at the time of writing this, that was indeed the case).
 
@@ -60,7 +60,7 @@ How can we identify which parts of `Ladybird`'s code are related to this module?
 find Ladybird/ -type f -ipath "*webgl*" \( -iname "*.cpp" -o -iname "*.h" \)
 ```
 
-After running this command we'll see list of source files from the `WebGL` module inside the `LibWeb` library. This definitely looks like the part of the codebase we should focus on. One interesting thing to notice is the file `Ladybird/Meta/Lagom/Tools/CodeGenerators/LibWeb/GenerateWebGLRenderingContext.cpp`, which appears to be code that generates other source files — not source code itself. Hmm, that looks interesting... Probably, we want to take a look at the generated code.
+After running this command we'll see list of source files from the `WebGL` module inside the `LibWeb` library. This definitely looks like the part of the codebase we should focus on. One interesting thing to notice is the file `Ladybird/Meta/Lagom/Tools/CodeGenerators/LibWeb/GenerateWebGLRenderingContext.cpp`, which appears to be code that generates other source files - not source code itself. Hmm, that looks interesting... Probably, we want to take a look at the generated code.
 
 Fortunately, we can get those files as part of the build process, and the author’s Dockerfile includes build instructions. So, after building Ladybird ourselves and grabbing all the relevant generated source files, we end up with the following list:
 ```
@@ -195,7 +195,7 @@ Only begin your audit once the XML document is provided
 ```
 After the first try and just one minute of waiting, GoPaTych responded to this prompt with a [description](./task/response.md) of the vulnerabilities. After manual verification, I confirmed that he wasn’t hallucinating. In fact, he found everything we needed to pwn it!
 
-While writing this writeup, I tried to reproduce the results — and in almost every run (with his memory disabled, if we can believe `OpenAI`), GoPaTych identified the same vulnerabilities (and sometimes even more...).
+While writing this writeup, I tried to reproduce the results - and in almost every run (with his memory disabled, if we can believe `OpenAI`), GoPaTych identified the same vulnerabilities (and sometimes even more...).
 
 So, if you want, you can try reproducing it yourself using [files4prompt.xml](./task/files4prompt.xml) and [prompt.md](./task/prompt.md).
 
@@ -532,7 +532,7 @@ pwndbg> x /gx 0x000076140c479400+0xa0
 Let’s inspect that address: `0x00005c5dc2239150`.
 ```
 pwndbg> info symbol 0x00005c5dc2239150
-vtable for JS::ArrayBuffer + 16 in section .data.rel.ro of target:/work/ladybird/libexec/WebConten
+vtable for JS::ArrayBuffer + 16 in section .data.rel.ro ...
 ```
 That’s the vtable pointer of the `ArrayBuffer` object.
 
@@ -575,7 +575,10 @@ Let’s do it!
 
 ![](./assets/finally.png)
 
-Now we can simply use a small `ArrayBuffer` with inline data (`trampoline`) to corrupt the data pointer of a larger `ArrayBuffer` lying right after it (`victim`). But probably, before corrupting it, we need to backup the data we’re going to overwrite - by reading it first.
+Now we can simply use a small `ArrayBuffer` with inline data (`trampoline`) to corrupt a larger `ArrayBuffer` that lies right after it in memory (`victim`). Specifically, we can overwrite its real data pointer with a fake one of our choosing. After that, any read/write operation on the corrupted `ArrayBuffer` will access memory at the address we set.
+
+However, since we have to overwrite a contiguous memory region before we can access the target data pointer, we need to preserve the original data when doing the overwrite. To handle this, we just read the original contents first - and then write them back with our modification in place.
+
 
 With this idea, we arrive at the following code:
 ```JavaScript
@@ -680,7 +683,7 @@ Now, we easily end up with the following common general method to execute arbitr
   // finish JS script execution to trigger shellcode
 ```
 
-### xpl01te3d
+### xpl01t3d
 
 ![](./assets/mother_hacker.png)
 

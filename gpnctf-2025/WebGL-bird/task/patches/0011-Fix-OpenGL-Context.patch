@@ -1,0 +1,202 @@
+From 364570e634cf7b4c50bcb7b1ec2e1bfe21d4cb55 Mon Sep 17 00:00:00 2001
+From: sg <sg@debian>
+Date: Tue, 1 Apr 2025 19:05:09 +0200
+Subject: [PATCH 11/11] Fix OpenGL Context
+
+---
+ Libraries/LibWeb/WebGL/OpenGLContext.cpp | 144 +++++++++++++----------
+ 1 file changed, 80 insertions(+), 64 deletions(-)
+
+diff --git a/Libraries/LibWeb/WebGL/OpenGLContext.cpp b/Libraries/LibWeb/WebGL/OpenGLContext.cpp
+index dc821ce3b0..ec44b84254 100644
+--- a/Libraries/LibWeb/WebGL/OpenGLContext.cpp
++++ b/Libraries/LibWeb/WebGL/OpenGLContext.cpp
+@@ -53,7 +53,7 @@ OpenGLContext::~OpenGLContext()
+ static EGLConfig get_egl_config(EGLDisplay display)
+ {
+     EGLint const config_attribs[] = {
+-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
++        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+         EGL_RED_SIZE, 8,
+         EGL_GREEN_SIZE, 8,
+@@ -129,7 +129,7 @@ OwnPtr<OpenGLContext> OpenGLContext::create(NonnullRefPtr<Gfx::SkiaBackendContex
+ 
+ void OpenGLContext::notify_content_will_change()
+ {
+-    m_painting_surface->notify_content_will_change();
++    // m_painting_surface->notify_content_will_change();
+ }
+ 
+ void OpenGLContext::clear_buffer_to_default_values()
+@@ -159,7 +159,7 @@ void OpenGLContext::allocate_painting_surface_if_needed()
+     auto width = m_size.width();
+     auto height = m_size.height();
+ 
+-    auto* display = m_impl->display;
++    // auto* display = m_impl->display;
+     auto* config = m_impl->config;
+ 
+ #ifdef AK_OS_MACOS
+@@ -168,24 +168,18 @@ void OpenGLContext::allocate_painting_surface_if_needed()
+ #endif
+ 
+     EGLint const surface_attributes[] = {
+-        EGL_WIDTH,
+-        width,
+-        EGL_HEIGHT,
+-        height,
+-#ifdef AK_OS_MACOS
+-        EGL_IOSURFACE_PLANE_ANGLE,
+-        0,
+-        EGL_TEXTURE_TARGET,
+-        target,
+-        EGL_TEXTURE_INTERNAL_FORMAT_ANGLE,
+-        GL_BGRA_EXT,
+-        EGL_TEXTURE_FORMAT,
+-        EGL_TEXTURE_RGBA,
+-        EGL_TEXTURE_TYPE_ANGLE,
+-        GL_UNSIGNED_BYTE,
+-        EGL_NONE,
+-#endif
+-        EGL_NONE,
++        EGL_WIDTH, width,
++        EGL_HEIGHT, height,
++    #ifdef AK_OS_MACOS
++        EGL_IOSURFACE_PLANE_ANGLE, 0,
++        EGL_TEXTURE_TARGET, target,
++        EGL_TEXTURE_INTERNAL_FORMAT_ANGLE, GL_BGRA_EXT,
++        EGL_TEXTURE_FORMAT, EGL_TEXTURE_RGBA,
++        EGL_TEXTURE_TYPE_ANGLE, GL_UNSIGNED_BYTE,
++    #else
++        // EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
++    #endif
++        EGL_NONE
+     };
+ 
+ #ifdef AK_OS_MACOS
+@@ -196,21 +190,43 @@ void OpenGLContext::allocate_painting_surface_if_needed()
+ 
+     ScopeGuard close_dma_buf_fd = [&] { ::close(dma_buf_fd); };
+ 
+-    EGLint image_attribs[] = {
+-        EGL_WIDTH, width,
+-        EGL_HEIGHT, height,
+-        EGL_LINUX_DRM_FOURCC_EXT, DRM_FORMAT_ARGB8888,
+-        EGL_DMA_BUF_PLANE0_FD_EXT, dma_buf_fd,
+-        EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
+-        EGL_DMA_BUF_PLANE0_PITCH_EXT, width * 4,
+-        EGL_NONE
+-    };
+-    EGLImageKHR egl_image = eglCreateImageKHR(m_impl->display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, image_attribs);
+-    VERIFY(egl_image != EGL_NO_IMAGE_KHR);
+-
+-    m_impl->surface = eglCreatePbufferFromClientBuffer(m_impl->display, EGL_LINUX_DMA_BUF_EXT, egl_image, config, surface_attributes);
+-
+-    m_painting_surface = Gfx::PaintingSurface::wrap_vkimage(vulkan_image, m_skia_backend_context, Gfx::PaintingSurface::Origin::BottomLeft);
++    // EGLint image_attribs[] = {
++    //     EGL_WIDTH, width,
++    //     EGL_HEIGHT, height,
++    //     EGL_LINUX_DRM_FOURCC_EXT, DRM_FORMAT_ARGB8888,
++    //     EGL_DMA_BUF_PLANE0_FD_EXT, dma_buf_fd,
++    //     EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
++    //     EGL_DMA_BUF_PLANE0_PITCH_EXT, width * 4,
++    //     EGL_NONE
++    // };
++    // EGLImageKHR egl_image = eglCreateImageKHR(m_impl->display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, image_attribs);
++    // VERIFY(egl_image != EGL_NO_IMAGE_KHR);
++
++    // m_impl->surface = eglCreatePbufferFromClientBuffer(m_impl->display, EGL_LINUX_DMA_BUF_EXT, egl_image, config, surface_attributes);
++
++    m_impl->surface = eglCreatePbufferSurface(m_impl->display, config, surface_attributes);
++    if (m_impl->surface == EGL_NO_SURFACE) {
++        auto error = eglGetError();
++        switch (error) {
++        case EGL_BAD_MATCH:
++            dbgln("Failed to create EGL surface: Surface attributes don't match the chosen config (EGL_BAD_MATCH)");
++            break;
++        case EGL_BAD_CONFIG:
++            dbgln("Failed to create EGL surface: Invalid EGL config (EGL_BAD_CONFIG)");
++            break;
++        case EGL_BAD_ATTRIBUTE:
++            dbgln("Failed to create EGL surface: Invalid surface attribute (EGL_BAD_ATTRIBUTE)");
++            break;
++        case EGL_BAD_ALLOC:
++            dbgln("Failed to create EGL surface: Not enough resources available (EGL_BAD_ALLOC)");
++            break;
++        default:
++            dbgln("Failed to create EGL surface: Unknown error ({:x})", error);
++        }
++        return;
++    }
++    // m_painting_surface = Gfx::PaintingSurface::wrap_vkimage(vulkan_image, m_skia_backend_context, Gfx::PaintingSurface::Origin::BottomLeft);
++    m_painting_surface = Gfx::PaintingSurface::create_with_size(m_skia_backend_context, Gfx::IntSize(width,height), Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied);
+ #endif
+ 
+     if (m_impl->surface == EGL_NO_SURFACE) {
+@@ -220,34 +236,34 @@ void OpenGLContext::allocate_painting_surface_if_needed()
+ 
+     eglMakeCurrent(m_impl->display, m_impl->surface, m_impl->surface, m_impl->context);
+ 
+-    EGLint texture_target = 0;
+-#ifdef AK_OS_MACOS
+-    eglGetConfigAttrib(display, config, EGL_BIND_TO_TEXTURE_TARGET_ANGLE, &texture_target);
+-    VERIFY(texture_target == EGL_TEXTURE_RECTANGLE_ANGLE);
+-#else
+-    texture_target = GL_TEXTURE_2D;
+-#endif
+-
+-    GLuint texture = 0;
+-    glGenTextures(1, &texture);
+-    glBindTexture(texture_target, texture);
+-
+-    auto result = eglBindTexImage(display, m_impl->surface, EGL_BACK_BUFFER);
+-    if (result == EGL_FALSE) {
+-        dbgln("Failed to bind texture image to EGL surface: {:x}", eglGetError());
+-        VERIFY_NOT_REACHED();
+-    }
+-
+-    glGenFramebuffers(1, &m_impl->framebuffer);
+-    glBindFramebuffer(GL_FRAMEBUFFER, m_impl->framebuffer);
+-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, texture_target, texture, 0);
+-
+-    // NOTE: ANGLE doesn't allocate depth buffer for us, so we need to do it manually
+-    // FIXME: Depth buffer only needs to be allocated if it's configured in WebGL context attributes
+-    glGenRenderbuffers(1, &m_impl->depth_buffer);
+-    glBindRenderbuffer(GL_RENDERBUFFER, m_impl->depth_buffer);
+-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, width, height);
+-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_impl->depth_buffer);
++//     EGLint texture_target = 0;
++// #ifdef AK_OS_MACOS
++//     eglGetConfigAttrib(display, config, EGL_BIND_TO_TEXTURE_TARGET_ANGLE, &texture_target);
++//     VERIFY(texture_target == EGL_TEXTURE_RECTANGLE_ANGLE);
++// #else
++//     texture_target = GL_TEXTURE_2D;
++// #endif
++
++    // GLuint texture = 0;
++    // glGenTextures(1, &texture);
++    // glBindTexture(texture_target, texture);
++    //
++    // auto result = eglBindTexImage(display, m_impl->surface, EGL_BACK_BUFFER);
++    // if (result == EGL_FALSE) {
++    //     dbgln("Failed to bind texture image to EGL surface: {:x}", eglGetError());
++    //     VERIFY_NOT_REACHED();
++    // }
++    //
++    // glGenFramebuffers(1, &m_impl->framebuffer);
++    // glBindFramebuffer(GL_FRAMEBUFFER, m_impl->framebuffer);
++    // glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, texture_target, texture, 0);
++    //
++    // // NOTE: ANGLE doesn't allocate depth buffer for us, so we need to do it manually
++    // // FIXME: Depth buffer only needs to be allocated if it's configured in WebGL context attributes
++    // glGenRenderbuffers(1, &m_impl->depth_buffer);
++    // glBindRenderbuffer(GL_RENDERBUFFER, m_impl->depth_buffer);
++    // glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, width, height);
++    // glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_impl->depth_buffer);
+ }
+ 
+ void OpenGLContext::set_size(Gfx::IntSize const& size)
+-- 
+2.39.5
+

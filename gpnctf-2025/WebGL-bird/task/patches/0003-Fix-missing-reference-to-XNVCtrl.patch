@@ -1,0 +1,30 @@
+From 90d8140b12a35b14cf751482c0567bbd35dc7ab0 Mon Sep 17 00:00:00 2001
+From: sg <sg@debian>
+Date: Sun, 30 Mar 2025 17:08:57 +0200
+Subject: [PATCH 03/11] Fix missing reference to XNVCtrl
+
+---
+ .../vcpkg/overlay-ports/angle/cmake-buildsystem/CMakeLists.txt | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/CMakeLists.txt b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/CMakeLists.txt
+index 5a724a9e68..d1803b4366 100644
+--- a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/CMakeLists.txt
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/CMakeLists.txt
+@@ -386,11 +386,12 @@ add_library(ANGLE::ANGLE ALIAS ANGLEFramework)
+ # X11 support
+ if (angle_use_x11)
+     find_package(X11 COMPONENTS Xext Xi REQUIRED)
++    find_library(XNVCTRL_LIBRARY XNVCtrl)
+     target_include_directories(ANGLE PRIVATE ${X11_INCLUDE_DIR})
+     target_sources(ANGLE PRIVATE ${libangle_gpu_info_util_x11_sources})
+     target_sources(ANGLE PRIVATE "src/gpu_info_util/SystemInfo_x11.cpp")
+     target_compile_definitions(ANGLE PRIVATE ANGLE_USE_X11 GPU_INFO_USE_X11)
+-    target_link_libraries(ANGLE PRIVATE ${X11_LIBRARIES} X11::X11 X11::Xi X11::Xext)
++    target_link_libraries(ANGLE PRIVATE ${X11_LIBRARIES} X11::X11 X11::Xi X11::Xext ${XNVCTRL_LIBRARY})
+ endif()
+ 
+ # set export names of some targets to match prior vcpkg port buildsystem
+-- 
+2.39.5
+

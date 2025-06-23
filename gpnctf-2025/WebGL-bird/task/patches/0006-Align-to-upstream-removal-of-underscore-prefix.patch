@@ -1,0 +1,73 @@
+From e34d016a7bb9e8086438f8d16647c16a0dc36657 Mon Sep 17 00:00:00 2001
+From: sg <sg@debian>
+Date: Sun, 30 Mar 2025 17:12:04 +0200
+Subject: [PATCH 06/11] Align to upstream removal of underscore prefix
+
+---
+ .../angle/cmake-buildsystem/PlatformLinux.cmake             | 2 +-
+ .../overlay-ports/angle/cmake-buildsystem/PlatformMac.cmake | 4 ++--
+ .../overlay-ports/angle/cmake-buildsystem/PlatformWin.cmake | 6 +++---
+ 3 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformLinux.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformLinux.cmake
+index 018bf7f85e..4a1f9ca3a2 100644
+--- a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformLinux.cmake
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformLinux.cmake
+@@ -8,7 +8,7 @@ endif ()
+ 
+ if (USE_ANGLE_EGL OR ENABLE_WEBGL)
+     list(APPEND ANGLE_SOURCES
+-        ${_gl_backend_sources}
++        ${gl_backend_sources}
+ 
+         ${angle_system_utils_sources_linux}
+         ${angle_system_utils_sources_posix}
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformMac.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformMac.cmake
+index 4fda2ba46b..eb3f5989f3 100644
+--- a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformMac.cmake
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformMac.cmake
+@@ -17,7 +17,7 @@ list(APPEND ANGLEGLESv2_LIBRARIES
+ # Metal backend
+ if(USE_METAL)
+     list(APPEND ANGLE_SOURCES
+-        ${_metal_backend_sources}
++        ${metal_backend_sources}
+ 
+         ${angle_translator_lib_metal_sources}
+     
+@@ -46,7 +46,7 @@ endif()
+ 
+ if(USE_ANGLE_EGL OR ENABLE_WEBGL)
+     list(APPEND ANGLE_SOURCES
+-        ${_gl_backend_sources}
++        ${gl_backend_sources}
+ 
+         ${libangle_gl_egl_dl_sources}
+         ${libangle_gl_egl_sources}
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformWin.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformWin.cmake
+index 97ac61915f..c136a1e0b4 100644
+--- a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformWin.cmake
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformWin.cmake
+@@ -9,8 +9,8 @@ list(APPEND ANGLE_DEFINITIONS
+ 
+ # We're targeting Windows 10 which will have DirectX 11
+ list(APPEND ANGLE_SOURCES
+-    ${_d3d11_backend_sources}
+-    ${_d3d_shared_sources}
++    ${d3d11_backend_sources}
++    ${d3d_shared_sources}
+ 
+     ${angle_translator_hlsl_sources}
+ 
+@@ -52,7 +52,7 @@ if(USE_OPENGL)
+ 
+     if(USE_ANGLE_EGL OR ENABLE_WEBGL)
+         list(APPEND ANGLE_SOURCES
+-            ${_gl_backend_sources}
++            ${gl_backend_sources}
+ 
+             ${libangle_gl_egl_dl_sources}
+             ${libangle_gl_egl_sources}
+-- 
+2.39.5
+

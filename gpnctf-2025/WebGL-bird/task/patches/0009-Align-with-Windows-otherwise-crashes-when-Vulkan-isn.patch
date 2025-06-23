@@ -1,0 +1,39 @@
+From 7db77afc6d855b796082d3eddd7b26a1dfb627d4 Mon Sep 17 00:00:00 2001
+From: sg <sg@debian>
+Date: Sun, 30 Mar 2025 17:14:55 +0200
+Subject: [PATCH 09/11] Align with Windows, otherwise crashes when Vulkan isn't
+ available.
+
+See https://github.com/microsoft/vcpkg/issues/31954
+See https://issues.angleproject.org/issues/42266631
+---
+ .../overlay-ports/angle/cmake-buildsystem/PlatformLinux.cmake    | 1 +
+ .../overlay-ports/angle/cmake-buildsystem/PlatformMac.cmake      | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformLinux.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformLinux.cmake
+index 4a1f9ca3a2..ebcf2b0947 100644
+--- a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformLinux.cmake
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformLinux.cmake
+@@ -25,6 +25,7 @@ if (USE_ANGLE_EGL OR ENABLE_WEBGL)
+ 
+     list(APPEND ANGLE_DEFINITIONS
+         ANGLE_ENABLE_OPENGL
++            ANGLE_ENABLE_GL_DESKTOP_BACKEND
+     )
+ 
+ endif ()
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformMac.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformMac.cmake
+index eb3f5989f3..1b9aa480c0 100644
+--- a/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformMac.cmake
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/cmake-buildsystem/PlatformMac.cmake
+@@ -55,5 +55,6 @@ if(USE_ANGLE_EGL OR ENABLE_WEBGL)
+ 
+     list(APPEND ANGLE_DEFINITIONS
+         ANGLE_ENABLE_OPENGL
++            ANGLE_ENABLE_GL_DESKTOP_BACKEND
+     )
+ endif()
+-- 
+2.39.5
+

@@ -1,0 +1,43 @@
+From 6de65706eecce2a27f192cfff4f13dfc141a0aa1 Mon Sep 17 00:00:00 2001
+From: sg <sg@debian>
+Date: Sun, 30 Mar 2025 17:11:15 +0200
+Subject: [PATCH 05/11] Stub out ANGLEShaderProgramVersion.h
+
+---
+ .../overlay-ports/angle/ANGLEShaderProgramVersion.h.in   | 2 ++
+ Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake      | 9 +++++++++
+ 2 files changed, 11 insertions(+)
+ create mode 100644 Meta/CMake/vcpkg/overlay-ports/angle/ANGLEShaderProgramVersion.h.in
+
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/ANGLEShaderProgramVersion.h.in b/Meta/CMake/vcpkg/overlay-ports/angle/ANGLEShaderProgramVersion.h.in
+new file mode 100644
+index 0000000000..21a4ea3c53
+--- /dev/null
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/ANGLEShaderProgramVersion.h.in
+@@ -0,0 +1,2 @@
++#define ANGLE_PROGRAM_VERSION "123456"
++#define ANGLE_PROGRAM_VERSION_HASH_SIZE 6
+\ No newline at end of file
+diff --git a/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake b/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake
+index 70b615cb27..ca4d17de63 100644
+--- a/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake
++++ b/Meta/CMake/vcpkg/overlay-ports/angle/portfile.cmake
+@@ -57,6 +57,15 @@ configure_file("${CMAKE_CURRENT_LIST_DIR}/angle_commit.h.in" "${SOURCE_PATH}/ang
+ configure_file("${CMAKE_CURRENT_LIST_DIR}/angle_commit.h.in" "${SOURCE_PATH}/src/common/angle_commit.h" @ONLY)
+ file(COPY "${CMAKE_CURRENT_LIST_DIR}/unofficial-angle-config.cmake" DESTINATION "${SOURCE_PATH}")
+ 
++# Generate ANGLEShaderProgramVersion.h
++#set(ANGLE_COMMIT_HASH_SIZE 12)
++#string(SUBSTRING "${ANGLE_COMMIT}" 0 ${ANGLE_COMMIT_HASH_SIZE} ANGLE_COMMIT_HASH)
++#set(ANGLE_COMMIT_DATE "invalid-date")
++#set(ANGLE_REVISION "${ANGLE_VERSION}")
++configure_file("${CMAKE_CURRENT_LIST_DIR}/ANGLEShaderProgramVersion.h.in" "${SOURCE_PATH}/ANGLEShaderProgramVersion.h" @ONLY)
++configure_file("${CMAKE_CURRENT_LIST_DIR}/ANGLEShaderProgramVersion.h.in" "${SOURCE_PATH}/src/common/ANGLEShaderProgramVersion.h" @ONLY)
++file(COPY "${CMAKE_CURRENT_LIST_DIR}/unofficial-angle-config.cmake" DESTINATION "${SOURCE_PATH}")
++
+ set(ANGLE_WEBKIT_BUILDSYSTEM_COMMIT "c603c2bbcb9cf5f231844bf7a3adc739968cde12")
+ 
+ # Download WebKit gni-to-cmake.py conversion script
+-- 
+2.39.5
+
