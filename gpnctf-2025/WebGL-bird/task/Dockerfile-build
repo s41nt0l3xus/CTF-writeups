@@ -1,0 +1,59 @@
+FROM debian:12
+
+RUN apt-get update && apt-get install -y \
+    autoconf \
+    autoconf-archive \
+    automake \
+    build-essential \
+    ccache \
+    clang-19 \
+    cmake \
+    curl \
+    fonts-liberation2 \
+    git \
+    libfontconfig1-dev \
+    libgl1-mesa-dev \
+    libgl1-mesa-dri \
+    libgl1-mesa-glx \
+    libpulse-dev \
+    libssl-dev \
+    libx11-dev \
+    libxext-dev \
+    libxinerama-dev \
+    libxnvctrl-dev \
+    libxrandr-dev \
+    libxcb1-dev \
+    libxcursor-dev \
+    libxi-dev \
+    mesa-common-dev \
+    mesa-utils \
+    nasm \
+    ninja-build \
+    pkg-config \
+    python3 \
+    python3-pip \
+    python3-ply \
+    qt6-base-dev \
+    qt6-tools-dev-tools \
+    qt6-wayland \
+    tar \
+    unzip \
+    xvfb \
+    zip \
+    && apt-get clean
+
+RUN ln -sT /usr/bin/ninja /usr/bin/ninja-build
+
+RUN useradd -m ctf
+USER ctf
+WORKDIR /work/ladybird
+
+RUN git clone https://github.com/LadybirdBrowser/ladybird.git /work/ladybird && \
+git checkout 223b13ae936d72fe379e2642efd683c1620b547c
+
+ADD patches /work/patches
+RUN git apply /work/patches/*.patch
+
+RUN ./Meta/ladybird.sh vcpkg \
+&& CC=clang-19 CXX=clang++-19 cmake --preset Distribution -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+&& ninja -C Build/distribution ladybird
