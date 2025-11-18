@@ -1,0 +1,7 @@
+| 0x20 bytes | 0x20 bytes | 
+| chunk A    | chunk B    |
+
+
+| 0x20 bytes | 0x20 bytes |
+| chunk A                 |
+             | chunk B    |

@@ -1,0 +1,14 @@
+services:
+  ipsecs:
+    mem_limit: 512M
+    pids_limit: 512
+    restart: unless-stopped
+    cpus: 1
+    read_only: false
+    build: .
+    ports:
+      - "11111:11111"
+      - "11112:11112"
+    cap_add:
+      - SYS_PTRACE
+    container_name: ipsecs
